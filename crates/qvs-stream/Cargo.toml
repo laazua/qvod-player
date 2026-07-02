@@ -1,0 +1,22 @@
+[package]
+name = "qvs-stream"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qvs-core = { path = "../qvs-core" }
+qvs-format = { path = "../qvs-format" }
+qvs-tracker = { path = "../qvs-tracker" }
+qvs-dht = { path = "../qvs-dht" }
+qvs-transport = { path = "../qvs-transport" }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+sha1.workspace = true
+rand.workspace = true
+futures.workspace = true

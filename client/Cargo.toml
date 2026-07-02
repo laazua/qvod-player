@@ -1,0 +1,16 @@
+[package]
+name = "qvs-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+qvs-core = { path = "../crates/qvs-core" }
+qvs-format = { path = "../crates/qvs-format" }
+qvs-transport = { path = "../crates/qvs-transport" }
+qvs-stream = { path = "../crates/qvs-stream" }
+
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true

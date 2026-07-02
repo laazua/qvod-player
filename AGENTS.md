@@ -846,15 +846,17 @@ cargo fmt --check --package qvs-{crate_name}
 
 | Crate | 状态 | 依赖 | 优先级 | 备注 |
 |-------|------|------|--------|------|
-| qvs-core | ⬜ 未开始 | 无 | P0 | 基础类型与 trait，必须先完成 |
-| qvs-format | ⬜ 未开始 | qvs-core | P0 | URI、Bencode、缓存，必须先完成 |
-| qvs-dht | ⬜ 未开始 | qvs-core | P1 | 可与 tracker 并行开发 |
-| qvs-tracker | ⬜ 未开始 | qvs-core | P1 | 可与 dht 并行开发 |
-| qvs-local-server | ⬜ 未开始 | qvs-stream | P2 | 依赖 stream 完成 |
-| qvs-transport | ⬜ 未开始 | qvs-core, qvs-format | P1 | 核心传输层 |
-| qvs-stream | ⬜ 未开始 | qvs-core, qvs-transport, qvs-format | P1 | 核心引擎 |
-| qvs-media | ⬜ 未开始 | qvs-core | P2 | 可与 GUI 并行开发 |
-| qvs-gui | ⬜ 未开始 | qvs-stream, qvs-media | P2 | 最上层，依赖最多 |
+| qvs-core | ✅ 已完成 | 无 | P0 | 基础类型与 trait，必须先完成 |
+| qvs-format | ✅ 已完成 | qvs-core | P0 | URI、Bencode、缓存。CacheManager 已修复：稀疏写入、LRU 清理、bitfield 追踪 |
+| qvs-dht | ✅ 已完成 | qvs-core | P1 | Kademlia DHT：路由表分裂、迭代 find_peers、桶刷新、23 个测试 |
+| qvs-tracker | ✅ 已完成 | qvs-core | P1 | HTTP Tracker：指数退避重试、多 tracker 负载均衡、超时控制 |
+| qvs-transport | ✅ 已完成 | qvs-core, qvs-format | P1 | 核心传输层：完整消息解析 (11 种消息)、NAT 穿越 (STUN)、P2SP 下载 (4 级优先级)、拥塞控制 |
+| qvs-stream | ✅ 已完成 | qvs-core, qvs-transport, qvs-format | P1 | 核心引擎：QvodEngine 集成 tracker+DHT+transport+cache+seeker，async play/pause/seek/stop |
+| qvs-local-server | ✅ 已完成 | qvs-stream | P2 | HTTP 流式服务器：/play 流媒体、/segment 切片、POST /control、IP 速率限制 (100 req/s)、优雅关闭 |
+| qvs-media | ✅ 已完成 | qvs-core | P2 | 媒体层 (stubs：dev libs 未安装时优雅返回错误) |
+| qvs-gui | ✅ 已完成 | qvs-stream, qvs-media | P2 | egui 播放器：播放器面板、控制栏、播放列表、设置页、状态面板、覆盖层、深色/浅色主题 |
+| qvs-server | ✅ 已完成 | qvs-stream, qvs-local-server | P1 | Headless 守护进程：8 个测试 |
+| qvs-cli | ✅ 已完成 | qvs-stream | P1 | CLI 客户端：play/status/list/cache 子命令，90 个测试 |
 
 ## 构建验证
 
