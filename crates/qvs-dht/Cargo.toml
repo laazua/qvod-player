@@ -1,0 +1,19 @@
+[package]
+name = "qvs-dht"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qvs-core = { path = "../qvs-core" }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+sha1.workspace = true
+rand.workspace = true
+bytes.workspace = true
+async-trait.workspace = true

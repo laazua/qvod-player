@@ -1,0 +1,13 @@
+pub const PIECE_LENGTH: u64 = 262_144;
+pub const BLOCK_LENGTH: u64 = 16_384;
+pub const MAX_BLOCKS_PER_PIECE: u32 = 16;
+pub const PROTOCOL_MAGIC: [u8; 4] = [0x51, 0x56, 0x44, 0x54];
+pub const HANDSHAKE_PROTOCOL: &str = "Qvod P2SP Protocol";
+pub const DEFAULT_PORT: u16 = 8621;
+pub const MAX_PEER_CONNECTIONS: u32 = 50;
+pub const DEFAULT_BUFFER_MB: u32 = 64;
+pub const DHT_K: u8 = 8;
+pub const DHT_ALPHA: u8 = 3;
+pub const DHT_REFRESH_INTERVAL: u64 = 900;
+pub const DHT_PEER_TIMEOUT: u64 = 1800;
+pub const PROTOCOL_MAGIC_STR: [u8; 4] = [0x51, 0x56, 0x44, 0x54];

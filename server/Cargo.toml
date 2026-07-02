@@ -1,0 +1,21 @@
+[package]
+name = "qvs-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+qvs-core = { path = "../crates/qvs-core" }
+qvs-format = { path = "../crates/qvs-format" }
+qvs-dht = { path = "../crates/qvs-dht" }
+qvs-tracker = { path = "../crates/qvs-tracker" }
+qvs-transport = { path = "../crates/qvs-transport" }
+qvs-stream = { path = "../crates/qvs-stream" }
+qvs-local-server = { path = "../crates/qvs-local-server" }
+
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+toml.workspace = true
+serde.workspace = true

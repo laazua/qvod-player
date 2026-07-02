@@ -1,0 +1,15 @@
+[package]
+name = "qvs-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qvs-core = { path = "../qvs-core" }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
