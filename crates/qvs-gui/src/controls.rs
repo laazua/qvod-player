@@ -22,6 +22,7 @@ pub struct PlayerControls {
     pub buffered_seconds: f64,
 }
 
+use crate::skin::SkinEngine;
 use eframe::egui;
 
 impl PlayerControls {
@@ -38,56 +39,33 @@ impl PlayerControls {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, skin: &dyn SkinEngine) {
         ui.horizontal(|ui| {
-            ui.style_mut().spacing.item_spacing.x = 8.0;
+            ui.style_mut().spacing.item_spacing.x = 4.0;
 
-            let play_label = if self.playing { "⏸" } else { "▶" };
-            if ui
-                .add(egui::Button::new(play_label).min_size(egui::vec2(40.0, 40.0)))
-                .clicked()
-            {
+            if skin.draw_play_button(ui, self.playing) {
                 self.toggle_play();
             }
-
-            let pos_str = format!(
-                "{:02}:{:02}",
-                self.position_ms / 60000,
-                (self.position_ms / 1000) % 60
-            );
-            let dur_str = format!(
-                "{:02}:{:02}",
-                self.duration_ms / 60000,
-                (self.duration_ms / 1000) % 60
-            );
-            ui.label(format!("{pos_str} / {dur_str}"));
-
-            if self.duration_ms > 0 {
-                let mut pos_f32 = self.position_ms as f32 / self.duration_ms as f32;
-                let slider = ui.add(
-                    egui::Slider::new(&mut pos_f32, 0.0..=1.0)
-                        .text("")
-                        .show_value(false)
-                        .fixed_decimals(3),
-                );
-                if slider.changed() {
-                    let new_pos = (pos_f32 * self.duration_ms as f32) as u64;
-                    self.seek_to(new_pos);
-                }
+            if skin.draw_stop_button(ui) {
+                self.reset();
             }
 
             ui.separator();
 
-            ui.label("🔊");
-            ui.add(
-                egui::Slider::new(&mut self.volume, 0.0..=1.0)
-                    .text("")
-                    .show_value(false),
-            );
+            skin.draw_time_display(ui, self.position_ms, self.duration_ms);
 
-            let mute_label = if self.muted { "🔇" } else { "🔊" };
-            if ui.button(mute_label).clicked() {
-                self.muted = !self.muted;
+            if let Some(new_progress) =
+                skin.draw_progress_bar(ui, self.progress(), self.buffered_progress())
+            {
+                self.seek_to((new_progress * self.duration_ms as f32) as u64);
+            }
+
+            ui.separator();
+
+            skin.draw_volume_control(ui, &mut self.volume, &mut self.muted);
+
+            if skin.draw_fullscreen_button(ui) {
+                // Toggle fullscreen
             }
         });
     }
@@ -147,6 +125,14 @@ impl PlayerControls {
             return 0.0;
         }
         self.position_ms as f32 / self.duration_ms as f32
+    }
+
+    #[must_use]
+    pub fn buffered_progress(&self) -> f32 {
+        if self.duration_ms == 0 {
+            return 0.0;
+        }
+        self.buffered_seconds as f32 / (self.duration_ms as f32 / 1000.0)
     }
 
     pub fn reset(&mut self) {

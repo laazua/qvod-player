@@ -4,7 +4,7 @@ use eframe::Frame;
 use crate::player::PlayerPanel;
 use crate::playlist::PlaylistManager;
 use crate::settings::AppSettings;
-use crate::skin::{Qvod6Skin, SkinEngine, TitleBarAction};
+use crate::skin::{palette, Qvod6Skin, SkinEngine, TitleBarAction};
 use crate::status::StatusPanel;
 use crate::theme::QvodTheme;
 
@@ -168,9 +168,12 @@ impl eframe::App for QvodApp {
             AppPage::Status => self.status.ui(ui),
         });
 
-        egui::TopBottomPanel::bottom("controls").show(ctx, |ui| {
-            self.player.controls.ui(ui);
-        });
+        egui::TopBottomPanel::bottom("controls")
+            .min_height(48.0)
+            .frame(egui::Frame::none().fill(palette::CONTROL_BAR_BG))
+            .show(ctx, |ui| {
+                self.player.controls.ui(ui, &*self.skin);
+            });
 
         if self.player.controls.playing && self.player_state == PlayerState::Paused {
             self.player_state = PlayerState::Playing;
