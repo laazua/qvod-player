@@ -8,6 +8,7 @@ pub struct PlaylistManager {
     selected: Option<usize>,
     tab_active: usize,
     history: Vec<String>,
+    show_context_menu: Option<(usize, egui::Pos2)>,
 }
 
 impl PlaylistManager {
@@ -18,6 +19,7 @@ impl PlaylistManager {
             selected: None,
             tab_active: 0,
             history: Vec::new(),
+            show_context_menu: None,
         }
     }
 
@@ -38,26 +40,52 @@ impl PlaylistManager {
             if let Some(act) = action {
                 match act {
                     TaskAction::Select(idx) => self.selected = Some(idx),
-                    TaskAction::ContextMenu(_idx) => {
-                        let items = [
-                            (
-                                "",
-                                vec![
-                                    ContextMenuAction::Play,
-                                    ContextMenuAction::Pause,
-                                    ContextMenuAction::Stop,
-                                    ContextMenuAction::Restart,
-                                    ContextMenuAction::Remove,
-                                ],
-                            ),
-                            ("", vec![ContextMenuAction::Properties]),
-                        ];
-                        let _result = skin.draw_context_menu(ui, &items);
+                    TaskAction::ContextMenu(idx) => {
+                        let cursor_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or_default();
+                        self.show_context_menu = Some((idx, cursor_pos));
                     }
                     _ => {}
                 }
             }
         });
+
+        if let Some((idx, pos)) = self.show_context_menu {
+            let items = [
+                (
+                    "",
+                    vec![
+                        ContextMenuAction::Play,
+                        ContextMenuAction::Pause,
+                        ContextMenuAction::Stop,
+                        ContextMenuAction::Restart,
+                        ContextMenuAction::Remove,
+                    ],
+                ),
+                ("", vec![ContextMenuAction::Properties]),
+            ];
+            let result = skin.draw_context_menu(ui, pos, &items);
+            match result {
+                Some(ContextMenuAction::Play) => {
+                    self.show_context_menu = None;
+                }
+                Some(ContextMenuAction::Remove) => {
+                    self.show_context_menu = None;
+                    self.entries.remove(idx);
+                    self.selected = None;
+                }
+                Some(ContextMenuAction::Properties) => {
+                    self.show_context_menu = None;
+                }
+                Some(_) => {
+                    self.show_context_menu = None;
+                }
+                None => {
+                    if ui.input(|i| i.pointer.any_click()) {
+                        self.show_context_menu = None;
+                    }
+                }
+            }
+        }
     }
 
     pub fn add(&mut self, entry: TaskEntry) {

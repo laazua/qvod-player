@@ -65,7 +65,7 @@ pub enum ContextMenuAction {
     SpeedLimit(u32),
 }
 
-use eframe::egui::{self, Context, Rect, Ui};
+use eframe::egui::{self, Context, Pos2, Rect, Ui};
 
 pub trait SkinEngine: Send + Sync {
     fn name(&self) -> &'static str;
@@ -92,6 +92,7 @@ pub trait SkinEngine: Send + Sync {
     fn draw_context_menu(
         &self,
         ui: &mut Ui,
+        pos: Pos2,
         items: &[(&str, Vec<ContextMenuAction>)],
     ) -> Option<ContextMenuAction>;
 }

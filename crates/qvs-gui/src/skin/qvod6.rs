@@ -464,21 +464,21 @@ impl SkinEngine for Qvod6Skin {
     fn draw_context_menu(
         &self,
         ui: &mut Ui,
+        pos: egui::Pos2,
         items: &[(&str, Vec<ContextMenuAction>)],
     ) -> Option<ContextMenuAction> {
         let mut result = None;
         let ctx = ui.ctx();
-        let pos = ctx
-            .input(|i| i.pointer.interact_pos())
-            .unwrap_or(egui::Pos2::ZERO);
-        egui::Area::new("context_menu_popup".into())
+        egui::Area::new(ui.next_auto_id())
             .fixed_pos(pos)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::none()
                     .fill(palette::MENU_BG)
                     .stroke(egui::Stroke::new(1.0, palette::MENU_SEPARATOR))
+                    .inner_margin(egui::Margin::symmetric(4.0, 2.0))
                     .show(ui, |ui| {
+                        ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
                         for (group_label, actions) in items {
                             if !group_label.is_empty() {
                                 ui.label(
@@ -488,6 +488,9 @@ impl SkinEngine for Qvod6Skin {
                                 );
                             }
                             for action in actions {
+                                if matches!(action, ContextMenuAction::SpeedLimit(_)) {
+                                    continue;
+                                }
                                 let label = match action {
                                     ContextMenuAction::Play => "播放",
                                     ContextMenuAction::Pause => "暂停",
@@ -504,9 +507,9 @@ impl SkinEngine for Qvod6Skin {
                                     ContextMenuAction::PriorityHigh => "优先下载 - 高",
                                     ContextMenuAction::PriorityNormal => "优先下载 - 普通",
                                     ContextMenuAction::PriorityLow => "优先下载 - 低",
-                                    ContextMenuAction::SpeedLimit(_) => return,
+                                    ContextMenuAction::SpeedLimit(_) => unreachable!(),
                                 };
-                                if ui.add(egui::SelectableLabel::new(false, label)).clicked() {
+                                if ui.selectable_label(false, label).clicked() {
                                     result = Some(action.clone());
                                 }
                             }
