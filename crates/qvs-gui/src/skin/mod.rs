@@ -45,7 +45,7 @@ pub enum TaskAction {
     ContextMenu(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ContextMenuAction {
     Play,
     Pause,

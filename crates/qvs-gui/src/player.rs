@@ -48,7 +48,7 @@ impl PlayerPanel {
         self.buffer_progress = 0.0;
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, state: &PlayerState) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, state: &PlayerState) -> egui::Rect {
         let available = ui.available_size();
         let (rect, _response) = ui.allocate_exact_size(available, egui::Sense::click());
 
@@ -65,7 +65,9 @@ impl PlayerPanel {
         } else {
             let text = match state {
                 PlayerState::Buffering => "Buffering...",
-                PlayerState::Error(_) => return,
+                PlayerState::Error(_) => {
+                    return rect;
+                }
                 _ => "No Video",
             };
             ui.painter().text(
@@ -85,6 +87,8 @@ impl PlayerPanel {
             ui.painter()
                 .rect_filled(bar_rect, 0.0, egui::Color32::from_rgb(0, 120, 215));
         }
+
+        rect
     }
 }
 

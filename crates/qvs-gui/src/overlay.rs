@@ -1,6 +1,7 @@
-use eframe::egui::{self, Color32};
+use eframe::egui::{self, Color32, Rect};
 
 use crate::app::PlayerState;
+use crate::skin::SkinEngine;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverlayType {
@@ -50,39 +51,38 @@ impl OverlayManager {
         self.visible
     }
 
-    pub fn draw(&mut self, ctx: &egui::Context, state: &PlayerState) {
+    pub fn draw(
+        &mut self,
+        ctx: &egui::Context,
+        state: &PlayerState,
+        skin: &dyn SkinEngine,
+        video_area: Rect,
+        time: f64,
+    ) {
         match state {
             PlayerState::Buffering => {
-                egui::Area::new("buffering".into())
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, -100.0])
+                egui::Area::new("overlay_buffering".into())
+                    .fixed_pos(video_area.min)
                     .show(ctx, |ui| {
-                        ui.label(
-                            egui::RichText::new("⏳ Buffering...")
-                                .size(24.0)
-                                .color(Color32::WHITE),
-                        );
+                        let painter = ui.painter();
+                        skin.draw_buffering_overlay(painter, video_area, time);
                     });
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
             }
             PlayerState::Error(msg) => {
-                egui::Area::new("error".into())
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                egui::Area::new("overlay_error".into())
+                    .fixed_pos(video_area.min)
                     .show(ctx, |ui| {
-                        ui.label(
-                            egui::RichText::new(format!("⚠ {msg}"))
-                                .size(18.0)
-                                .color(Color32::RED),
-                        );
+                        let painter = ui.painter();
+                        skin.draw_error_overlay(painter, video_area, msg);
                     });
             }
             PlayerState::Paused => {
-                egui::Area::new("paused".into())
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                egui::Area::new("overlay_paused".into())
+                    .fixed_pos(video_area.min)
                     .show(ctx, |ui| {
-                        ui.label(
-                            egui::RichText::new("⏸ Paused")
-                                .size(32.0)
-                                .color(Color32::from_rgba_premultiplied(255, 255, 255, 128)),
-                        );
+                        let painter = ui.painter();
+                        skin.draw_info_overlay(painter, video_area, "⏸ 已暂停");
                     });
             }
             _ => {}

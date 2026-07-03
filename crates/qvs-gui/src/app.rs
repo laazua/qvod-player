@@ -171,11 +171,21 @@ impl eframe::App for QvodApp {
                 self.playlist.ui(ui, &*self.skin);
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.page {
-            AppPage::Player => self.player.ui(ui, &self.player_state),
-            AppPage::Settings => self.settings.ui(ui, &mut self.theme),
-            AppPage::Status => self.status.ui(ui),
-        });
+        let video_area: egui::Rect = match self.page {
+            AppPage::Player => {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| self.player.ui(ui, &self.player_state))
+                    .inner
+            }
+            AppPage::Settings => {
+                egui::CentralPanel::default().show(ctx, |ui| self.settings.ui(ui, &mut self.theme));
+                egui::Rect::NOTHING
+            }
+            AppPage::Status => {
+                egui::CentralPanel::default().show(ctx, |ui| self.status.ui(ui));
+                egui::Rect::NOTHING
+            }
+        };
 
         egui::TopBottomPanel::bottom("controls")
             .min_height(48.0)
@@ -191,7 +201,12 @@ impl eframe::App for QvodApp {
             self.player_state = PlayerState::Paused;
         }
 
-        self.player.overlay.draw(ctx, &self.player_state);
+        if self.page == AppPage::Player {
+            let time = ctx.input(|i| i.time);
+            self.player
+                .overlay
+                .draw(ctx, &self.player_state, &*self.skin, video_area, time);
+        }
     }
 }
 

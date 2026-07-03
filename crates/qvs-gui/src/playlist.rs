@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::skin::{SkinEngine, TaskAction, TaskEntry};
+use crate::skin::{ContextMenuAction, SkinEngine, TaskAction, TaskEntry};
 
 #[derive(Debug)]
 pub struct PlaylistManager {
@@ -38,7 +38,22 @@ impl PlaylistManager {
             if let Some(act) = action {
                 match act {
                     TaskAction::Select(idx) => self.selected = Some(idx),
-                    TaskAction::ContextMenu(_idx) => { /* show context menu */ }
+                    TaskAction::ContextMenu(_idx) => {
+                        let items = [
+                            (
+                                "",
+                                vec![
+                                    ContextMenuAction::Play,
+                                    ContextMenuAction::Pause,
+                                    ContextMenuAction::Stop,
+                                    ContextMenuAction::Restart,
+                                    ContextMenuAction::Remove,
+                                ],
+                            ),
+                            ("", vec![ContextMenuAction::Properties]),
+                        ];
+                        let _result = skin.draw_context_menu(ui, &items);
+                    }
                     _ => {}
                 }
             }

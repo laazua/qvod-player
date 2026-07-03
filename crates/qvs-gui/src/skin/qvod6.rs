@@ -1,4 +1,5 @@
 use eframe::egui::{self, Context, Rect, Sense, Ui};
+use std::f64::consts::TAU;
 
 use super::palette;
 use super::{ContextMenuAction, SkinEngine, TaskAction, TaskEntry, TaskStatus, TitleBarAction};
@@ -401,17 +402,118 @@ impl SkinEngine for Qvod6Skin {
         TaskAction::None
     }
 
-    fn draw_buffering_overlay(&self, _painter: &egui::Painter, _area: Rect, _time: f64) {}
+    fn draw_buffering_overlay(&self, painter: &egui::Painter, area: Rect, time: f64) {
+        painter.rect_filled(area, 0.0, palette::OVERLAY_BG);
 
-    fn draw_error_overlay(&self, _painter: &egui::Painter, _area: Rect, _msg: &str) {}
+        let center = area.center();
+        let radius = 20.0;
+        let num_segments = 8;
+        let angle_offset = (time * 3.0) % TAU;
 
-    fn draw_info_overlay(&self, _painter: &egui::Painter, _area: Rect, _info: &str) {}
+        for i in 0..num_segments {
+            let angle = angle_offset + (f64::from(i) * TAU / f64::from(num_segments));
+            let alpha = (num_segments - i) as f32 / num_segments as f32;
+            let color =
+                egui::Color32::from_rgba_premultiplied(0x4F, 0xC3, 0xF7, (alpha * 200.0) as u8);
+
+            let start = egui::pos2(
+                center.x + radius * (angle as f32).cos(),
+                center.y + radius * (angle as f32).sin(),
+            );
+            let end = egui::pos2(
+                center.x + (radius + 6.0) * (angle as f32).cos(),
+                center.y + (radius + 6.0) * (angle as f32).sin(),
+            );
+            painter.line_segment([start, end], egui::Stroke::new(3.0, color));
+        }
+
+        painter.text(
+            egui::pos2(center.x, center.y + 35.0),
+            egui::Align2::CENTER_CENTER,
+            "缓冲中...",
+            egui::FontId::proportional(14.0),
+            palette::TEXT_PRIMARY,
+        );
+    }
+
+    fn draw_error_overlay(&self, painter: &egui::Painter, area: Rect, msg: &str) {
+        painter.rect_filled(
+            area,
+            0.0,
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 180),
+        );
+        painter.text(
+            area.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("⚠ {msg}"),
+            egui::FontId::proportional(18.0),
+            palette::ERROR,
+        );
+    }
+
+    fn draw_info_overlay(&self, painter: &egui::Painter, area: Rect, info: &str) {
+        painter.text(
+            egui::pos2(area.min.x + 8.0, area.min.y + 8.0),
+            egui::Align2::LEFT_TOP,
+            info,
+            egui::FontId::proportional(12.0),
+            palette::TEXT_SECONDARY,
+        );
+    }
 
     fn draw_context_menu(
         &self,
-        _ui: &mut Ui,
-        _items: &[(&str, Vec<ContextMenuAction>)],
+        ui: &mut Ui,
+        items: &[(&str, Vec<ContextMenuAction>)],
     ) -> Option<ContextMenuAction> {
-        None
+        let mut result = None;
+        let ctx = ui.ctx();
+        let pos = ctx
+            .input(|i| i.pointer.interact_pos())
+            .unwrap_or(egui::Pos2::ZERO);
+        egui::Area::new("context_menu_popup".into())
+            .fixed_pos(pos)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(palette::MENU_BG)
+                    .stroke(egui::Stroke::new(1.0, palette::MENU_SEPARATOR))
+                    .show(ui, |ui| {
+                        for (group_label, actions) in items {
+                            if !group_label.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(*group_label)
+                                        .size(10.0)
+                                        .color(palette::TEXT_SECONDARY),
+                                );
+                            }
+                            for action in actions {
+                                let label = match action {
+                                    ContextMenuAction::Play => "播放",
+                                    ContextMenuAction::Pause => "暂停",
+                                    ContextMenuAction::Stop => "停止",
+                                    ContextMenuAction::Restart => "重新开始",
+                                    ContextMenuAction::Remove => "删除",
+                                    ContextMenuAction::Properties => "属性",
+                                    ContextMenuAction::ToggleFullscreen => "全屏",
+                                    ContextMenuAction::AspectRatio4x3 => "画面比例 4:3",
+                                    ContextMenuAction::AspectRatio16x9 => "画面比例 16:9",
+                                    ContextMenuAction::AspectRatioOriginal => "画面比例 原始",
+                                    ContextMenuAction::OpenSettings => "设置",
+                                    ContextMenuAction::About => "关于",
+                                    ContextMenuAction::PriorityHigh => "优先下载 - 高",
+                                    ContextMenuAction::PriorityNormal => "优先下载 - 普通",
+                                    ContextMenuAction::PriorityLow => "优先下载 - 低",
+                                    ContextMenuAction::SpeedLimit(_) => return,
+                                };
+                                if ui.add(egui::SelectableLabel::new(false, label)).clicked() {
+                                    result = Some(action.clone());
+                                }
+                            }
+                            ui.separator();
+                        }
+                    });
+            });
+        result
     }
 }
