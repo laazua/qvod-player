@@ -77,18 +77,18 @@ impl UdpPacket {
 
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(17 + self.payload.len());
+        let mut buf = Vec::with_capacity(15 + self.payload.len());
         buf.push(self.msg_type as u8);
         buf.extend_from_slice(&self.seq.to_be_bytes());
         buf.extend_from_slice(&self.piece_index.to_be_bytes());
         buf.extend_from_slice(&self.block_offset.to_be_bytes());
-        buf.extend_from_slice(&(self.payload.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&(self.payload.len() as u16).to_be_bytes());
         buf.extend_from_slice(&self.payload);
         buf
     }
 
     pub fn decode(data: &[u8]) -> Result<Self, QvodError> {
-        if data.len() < 17 {
+        if data.len() < 15 {
             return Err(QvodError::Protocol("udp packet too short".into()));
         }
         let msg_type = UdpMsgType::from_u8(data[0])
@@ -96,11 +96,11 @@ impl UdpPacket {
         let seq = u32::from_be_bytes([data[1], data[2], data[3], data[4]]);
         let piece_index = u32::from_be_bytes([data[5], data[6], data[7], data[8]]);
         let block_offset = u32::from_be_bytes([data[9], data[10], data[11], data[12]]);
-        let payload_len = u32::from_be_bytes([data[13], data[14], data[15], data[16]]) as usize;
-        if 17 + payload_len > data.len() {
+        let payload_len = u16::from_be_bytes([data[13], data[14]]) as usize;
+        if 15 + payload_len > data.len() {
             return Err(QvodError::Protocol("udp packet payload truncated".into()));
         }
-        let payload = data[17..17 + payload_len].to_vec();
+        let payload = data[15..15 + payload_len].to_vec();
         Ok(Self {
             msg_type,
             seq,
@@ -112,7 +112,7 @@ impl UdpPacket {
 
     #[must_use]
     pub fn size(&self) -> usize {
-        17 + self.payload.len()
+        15 + self.payload.len()
     }
 }
 
@@ -209,6 +209,10 @@ impl UdpTransport {
                     }
                 }
             }
+            UdpMsgType::Ping => {
+                let pong = UdpPacket::new(UdpMsgType::Pong, packet.seq, 0, 0, Vec::new());
+                let _ = self.socket.send_to(&pong.encode(), addr).await;
+            }
             _ => {}
         }
 
@@ -302,8 +306,10 @@ mod tests {
 
     #[test]
     fn test_packet_size_limit() {
-        let packet = UdpPacket::new(UdpMsgType::Data, 1, 0, 0, vec![0u8; MAX_PACKET_SIZE - 17]);
+        let payload_size = MAX_PACKET_SIZE - 15;
+        let packet = UdpPacket::new(UdpMsgType::Data, 1, 0, 0, vec![0u8; payload_size]);
         assert!(packet.size() <= MAX_PACKET_SIZE);
+        assert_eq!(packet.size(), MAX_PACKET_SIZE);
     }
 
     #[test]

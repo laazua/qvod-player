@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=QVOD Player
+Name[zh_CN]=快播播放器
+Comment=QVOD P2SP Streaming Media Player
+Comment[zh_CN]=快播 P2SP 流媒体播放器
+Exec=qvs-gui %U
+Icon=qvs
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;
+MimeType=x-scheme-handler/qvod;
+StartupNotify=true
+StartupWMClass=QvodPlayer

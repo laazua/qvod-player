@@ -8,6 +8,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+qvs-core = { path = "../qvs-core" }
 qvs-stream = { path = "../qvs-stream" }
 qvs-media = { path = "../qvs-media" }
 clap.workspace = true
@@ -20,3 +21,7 @@ eframe = "0.27"
 egui = "0.27"
 toml.workspace = true
 dirs.workspace = true
+reqwest.workspace = true
+
+[build-dependencies]
+embed-resource = "1"

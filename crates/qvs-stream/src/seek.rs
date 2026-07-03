@@ -57,6 +57,7 @@ mod tests {
             width: 0,
             height: 0,
             bitrate: 0,
+            from_cache: false,
         };
         let engine = SeekEngine::new(meta);
         assert_eq!(engine.piece_for_offset(0), 0);
@@ -79,6 +80,7 @@ mod tests {
             width: 0,
             height: 0,
             bitrate: 0,
+            from_cache: false,
         };
         let engine = SeekEngine::new(meta);
         assert!(engine.find_nearest_keyframe(5000).is_err());
@@ -115,6 +117,7 @@ mod tests {
             width: 0,
             height: 0,
             bitrate: 0,
+            from_cache: false,
         };
         let engine = SeekEngine::new(meta);
         let offset = engine.find_nearest_keyframe(3000).unwrap();

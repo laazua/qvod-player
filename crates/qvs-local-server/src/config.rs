@@ -4,6 +4,10 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 pub struct LocalServerConfig {
     pub preferred_port: u16,
     pub max_retry: u8,
+    /// IP address to bind the server to.
+    /// Use `0.0.0.0` to accept connections from all interfaces (required for
+    /// remote GUI clients); use `127.0.0.1` (default) for local-only access.
+    pub bind_address: IpAddr,
 }
 
 impl Default for LocalServerConfig {
@@ -11,6 +15,7 @@ impl Default for LocalServerConfig {
         Self {
             preferred_port: 8621,
             max_retry: 10,
+            bind_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
         }
     }
 }
@@ -21,7 +26,15 @@ impl LocalServerConfig {
         Self {
             preferred_port,
             max_retry: 10,
+            bind_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
         }
+    }
+
+    /// Set a custom bind address (builder-style).
+    #[must_use]
+    pub fn with_bind_address(mut self, addr: IpAddr) -> Self {
+        self.bind_address = addr;
+        self
     }
 
     #[must_use]
@@ -47,7 +60,7 @@ impl LocalServerConfig {
     pub async fn find_available_port_async(&self) -> Option<u16> {
         for offset in 0..=self.max_retry {
             let port = self.preferred_port + u16::from(offset);
-            if port_available_async(port).await {
+            if port_available_async(self.bind_address, port).await {
                 return Some(port);
             }
         }
@@ -55,8 +68,8 @@ impl LocalServerConfig {
     }
 }
 
-async fn port_available_async(port: u16) -> bool {
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+async fn port_available_async(bind_addr: IpAddr, port: u16) -> bool {
+    let addr = SocketAddr::new(bind_addr, port);
     tokio::net::TcpListener::bind(addr).await.is_ok()
 }
 
@@ -72,13 +85,13 @@ mod tests {
 
     #[test]
     fn test_port_available() {
-        let result = LocalServerConfig::port_available(9999);
+        let result = LocalServerConfig::port_available(9876);
         assert!(result);
     }
 
     #[test]
     fn test_find_available_port() {
-        let config = LocalServerConfig::new(9999);
+        let config = LocalServerConfig::new(9877);
         let port = config.find_available_port();
         assert!(port > 0);
     }

@@ -48,14 +48,14 @@ impl MediaFormat {
         if bytes.starts_with(b"RIFF") {
             return Self::Avi;
         }
-        if bytes.starts_with(b"\x30\x26\xb2\x75") || bytes.starts_with(b"\x2e\x52\x4d\x46") {
+        if bytes.starts_with(b"\x30\x26\xb2\x75") {
+            return Self::Wmv;
+        }
+        if bytes.starts_with(b"\x2e\x52\x4d\x46") {
             return Self::Rmvb;
         }
         if bytes.starts_with(b"\x47\x40") {
             return Self::Ts;
-        }
-        if bytes.starts_with(b"\x1a\x45") {
-            return Self::Webm;
         }
         Self::Unknown
     }

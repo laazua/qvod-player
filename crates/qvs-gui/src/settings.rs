@@ -10,6 +10,7 @@ pub struct AppSettings {
     pub cache_dir: PathBuf,
     pub cache_size_gb: u32,
     pub local_server_port: u16,
+    pub server_url: Option<String>,
     pub max_connections: u32,
     pub http_fallback: bool,
     pub tracker_urls: Vec<String>,
@@ -21,12 +22,15 @@ pub struct AppSettings {
 
 impl Default for AppSettings {
     fn default() -> Self {
+        // Allow baking in a server URL at compile/packaging time via QVS_SERVER_URL env var.
+        let baked_server_url = option_env!("QVS_SERVER_URL").map(String::from);
         Self {
             cache_dir: dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join("qvs"),
             cache_size_gb: 10,
             local_server_port: 8621,
+            server_url: baked_server_url,
             max_connections: 50,
             http_fallback: true,
             tracker_urls: vec!["http://tracker.qvod.com:8621/announce".into()],
@@ -35,6 +39,17 @@ impl Default for AppSettings {
             theme: "dark".into(),
             playlist_history: Vec::new(),
         }
+    }
+}
+
+impl AppSettings {
+    /// Override server_url from CLI argument (takes precedence over baked-in value).
+    #[must_use]
+    pub fn with_cli_server_url(mut self, cli_server_url: Option<String>) -> Self {
+        if let Some(url) = cli_server_url {
+            self.server_url = Some(url);
+        }
+        self
     }
 }
 
@@ -98,6 +113,22 @@ impl AppSettings {
 
                     ui.label("HTTP Port:");
                     ui.add(egui::Slider::new(&mut self.local_server_port, 1024..=65535));
+                    ui.end_row();
+
+                    ui.label("Server URL:");
+                    let mut server_url_str = self.server_url.clone().unwrap_or_default();
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut server_url_str)
+                            .desired_width(300.0)
+                            .hint_text("http://server:8621 (留空=本地模式)"),
+                    );
+                    if resp.changed() {
+                        if server_url_str.is_empty() {
+                            self.server_url = None;
+                        } else {
+                            self.server_url = Some(server_url_str);
+                        }
+                    }
                     ui.end_row();
 
                     ui.label("Max Connections:");

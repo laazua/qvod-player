@@ -912,3 +912,9 @@ cargo audit
 - 异步运行时: tokio (multi-thread)
 - HTTP 框架: axum
 - HTTP 客户端: reqwest
+
+
+## 最终要求
+
+- 实现的最终产品，无论是GUI还是功能都要与快播1:1完全一致
+
