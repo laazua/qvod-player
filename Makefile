@@ -121,6 +121,8 @@ gui-windows: check-env
 	@rm -rf $(DIR)
 	@mkdir -p $(DIR)/bin $(DIR)/scripts
 	cp target/x86_64-pc-windows-gnu/release/qvs-gui.exe $(DIR)/bin/
+	cp qvod.png $(DIR)/bin/qvs.png
+	cp assets/qvod.ico $(DIR)/bin/qvs.ico
 	@echo '@echo off' > $(DIR)/scripts/start-player.bat
 	@echo 'start "" "%~dp0..\bin\qvs-gui.exe"' $(if $(SERVER_URL),'--server-url "$(SERVER_URL)"',) >> $(DIR)/scripts/start-player.bat
 	cd $(DIST_DIR) && zip -qr packages/$(PKG_NAME)-$(SUFFIX)-$(VERSION).zip $(PKG_NAME)-$(SUFFIX)-$(VERSION)/

@@ -22,3 +22,6 @@ egui = "0.27"
 toml.workspace = true
 dirs.workspace = true
 reqwest.workspace = true
+
+[build-dependencies]
+embed-resource = "1"

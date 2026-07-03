@@ -290,6 +290,10 @@ package_gui_linux() {
     cp target/release/qvs-gui "${dir}/bin/"
     ln -sf qvs-gui "${dir}/bin/qvs"
 
+    # Icon — use the high-res PNG directly
+    cp qvod.png "${dir}/share/icons/hicolor/scalable/apps/qvs.png"
+    cp assets/qvod.ico "${dir}/share/icons/"
+
     # 配置文件
     if [ -n "${SERVER_URL}" ]; then
         cat > "${dir}/config/settings.toml" << TOML
@@ -348,16 +352,21 @@ package_gui_windows() {
     mkdir -p "${dir}/bin" "${dir}/config" "${dir}/scripts"
 
     cp "target/x86_64-pc-windows-gnu/release/qvs-gui.exe" "${dir}/bin/"
-    cp assets/icon.svg "${dir}/bin/"
 
-    # 配置文件 (Windows 路径: %APPDATA%/QVOD Player/settings.toml)
+    # Icon files — qvod.ico is embedded in the .exe at compile time via
+    # build.rs + icon.rc.  We also bundle copies here so installers and
+    # shortcuts can reference them at the filesystem level.
+    cp qvod.png "${dir}/bin/${PKG_NAME}.png"
+    cp assets/qvod.ico "${dir}/bin/${PKG_NAME}.ico"
+
+    # Configuration (Windows path: %APPDATA%/QVOD Player/settings.toml)
     if [ -n "${SERVER_URL}" ]; then
         cat > "${dir}/config/settings.toml" << TOML
 server_url = "${SERVER_URL}"
 TOML
     fi
 
-    # 启动脚本
+    # ── Start scripts ────────────────────────────────────────
     if [ -n "${SERVER_URL}" ]; then
         cat > "${dir}/scripts/start-player.bat" << BATEOF
 @echo off
@@ -372,27 +381,82 @@ start "" "%~dp0..\bin\qvs-gui.exe"
 BATEOF
     fi
 
-    # 协议注册脚本
-    local exe_path
-    exe_path=$(cd "${dir}/bin" && pwd -W 2>/dev/null || echo "%QVOD_ROOT%\bin")
+    # ── Protocol registration ─────────────────────────────────
     cat > "${dir}/scripts/register.bat" << 'REGBAT'
 @echo off
 title QVOD Protocol Registration
 set "EXE=%~dp0..\bin\qvs-gui.exe"
+
 reg add "HKCR\qvod" /ve /t REG_SZ /d "URL:QVOD Protocol" /f
 reg add "HKCR\qvod" /v "URL Protocol" /t REG_SZ /d "" /f
+reg add "HKCR\qvod\DefaultIcon" /ve /t REG_SZ /d "\"%~dp0..\bin\qvs.ico\"" /f
 reg add "HKCR\qvod\shell\open\command" /ve /t REG_SZ /d "\"%EXE%\" \"%%1\"" /f
 reg add "HKCR\.qvs" /ve /t REG_SZ /d "QVSFile" /f
+reg add "HKCR\QVSFile\DefaultIcon" /ve /t REG_SZ /d "\"%~dp0..\bin\qvs.ico\"" /f
 reg add "HKCR\QVSFile\shell\open\command" /ve /t REG_SZ /d "\"%EXE%\" \"%%1\"" /f
+
 echo qvod:// protocol registered!
+echo.
+echo You can now:
+echo   - Double-click .qvs files to open in QVOD Player
+echo   - Click qvod:// links in your browser
 pause
 REGBAT
 
-    # 使用说明
-    cat > "${dir}/使用说明.txt" << DOC
-QVOD GUI v${VERSION} — Windows
-服务器地址: ${SERVER_URL:-本地模式 (无服务器)}
-DOC
+    # ── Desktop shortcut creator ──────────────────────────────
+    cat > "${dir}/scripts/create-shortcut.bat" << 'SHCUT'
+@echo off
+title Create QVOD Shortcut
+set "ICON=%~dp0..\bin\qvs.ico"
+set "EXE=%~dp0..\bin\qvs-gui.exe"
+
+:: Create shortcut on Desktop using VBScript
+set "SNAME=QVOD Player"
+set "VBS=%TEMP%\mklnk.vbs"
+echo Set WshShell = WScript.CreateObject("WScript.Shell") > "%VBS%"
+echo Set lnk = WshShell.CreateShortcut(WshShell.SpecialFolders("Desktop") ^& "\" ^& "%SNAME%" ^& ".lnk") >> "%VBS%"
+echo lnk.TargetPath = "%EXE%" >> "%VBS%"
+echo lnk.IconLocation = "%ICON%, 0" >> "%VBS%"
+echo lnk.WorkingDirectory = "%~dp0..\bin" >> "%VBS%"
+echo lnk.Description = "QVOD P2SP Player" >> "%VBS%"
+echo lnk.Save >> "%VBS%"
+cscript //nologo "%VBS%"
+del "%VBS%"
+echo Desktop shortcut created!
+pause
+SHCUT
+
+    # ── README ────────────────────────────────────────────────
+    cat > "${dir}/README.txt" << README
+═══════════════════════════════════════
+  QVOD Player v${VERSION} — Windows
+═══════════════════════════════════════
+
+快速开始
+────────
+  1. 打开 bin/qvs-gui.exe
+  2. 输入或粘贴 qvod:// 链接开始播放
+  3. 支持拖放 .qvs 种子文件到窗口
+
+协议注册
+────────
+  运行 scripts/register.bat 注册 qvod:// 协议,
+  之后浏览器点击 qvod:// 链接会自动打开本播放器。
+
+创建桌面快捷方式
+────────────────
+  运行 scripts/create-shortcut.bat
+
+配置
+────
+  配置文件位于: %%APPDATA%%\QVOD Player\settings.toml
+  (首次启动后自动生成)
+
+鸣谢
+────
+  Built with Rust + egui
+  Server: ${SERVER_URL:-本地模式 (独立运行)}
+README
 
     cd "${DIST_DIR}"
     local arch="${PKG_NAME}-${suffix}-${VERSION}.zip"
@@ -410,6 +474,8 @@ package_gui_macos() {
     mkdir -p "${dir}/bin"
 
     cp "target/x86_64-apple-darwin/release/qvs-gui" "${dir}/bin/"
+    cp assets/qvod.ico "${dir}/"
+    cp qvod.png "${dir}/"
 
     if [ -n "${SERVER_URL}" ]; then
         cat > "${dir}/start.command" << CMD

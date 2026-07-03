@@ -93,8 +93,18 @@ impl StatusPanel {
                     } else {
                         egui::Color32::RED
                     };
-                    ui.colored_label(color, format!("{} {}", server_url,
-                        if self.status.server_connected { "✓" } else { "✗" }));
+                    ui.colored_label(
+                        color,
+                        format!(
+                            "{} {}",
+                            server_url,
+                            if self.status.server_connected {
+                                "✓"
+                            } else {
+                                "✗"
+                            }
+                        ),
+                    );
                     ui.end_row();
                 } else {
                     ui.label("Mode:");

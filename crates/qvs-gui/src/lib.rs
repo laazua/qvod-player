@@ -23,6 +23,7 @@
 pub mod app;
 pub mod client;
 pub mod controls;
+pub mod fonts;
 pub mod overlay;
 pub mod player;
 pub mod playlist;

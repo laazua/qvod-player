@@ -1,0 +1,47 @@
+/* Windows resource script for QVOD Player
+ * Compiled by windres (MinGW) via embed-resource into the .exe.
+ * Sets the application icon and version metadata. */
+
+/* Application icon (6 resolutions, 16x16 .. 256x256) */
+1 ICON "qvod.ico"
+
+/* Version info (Explorer right-click -> Properties -> Details) */
+1 VERSIONINFO
+ FILEVERSION     0,1,0,0
+ PRODUCTVERSION  0,1,0,0
+ FILEFLAGSMASK   0x3fL
+ FILEFLAGS       0x0L
+ FILEOS          0x40004L
+ FILETYPE        0x1L
+ FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName",      "QVOD Team"
+            VALUE "FileDescription",  "QVOD P2SP Player"
+            VALUE "FileVersion",      "0.1.0"
+            VALUE "InternalName",     "qvs-gui"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "qvs-gui.exe"
+            VALUE "ProductName",      "QVOD Player"
+            VALUE "ProductVersion",   "0.1.0"
+        END
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "QVOD Team"
+            VALUE "FileDescription",  "QVOD P2SP Player"
+            VALUE "FileVersion",      "0.1.0"
+            VALUE "InternalName",     "qvs-gui"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "qvs-gui.exe"
+            VALUE "ProductName",      "QVOD Player"
+            VALUE "ProductVersion",   "0.1.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 0x04B0, 0x0409, 0x04B0
+    END
+END
