@@ -4,14 +4,13 @@ use eframe::Frame;
 use crate::player::PlayerPanel;
 use crate::playlist::PlaylistManager;
 use crate::settings::AppSettings;
-use crate::skin::{palette, Qvod6Skin, SkinEngine, TitleBarAction};
+use crate::skin::{palette, Qvod6Skin, SkinEngine, TaskEntry, TaskStatus, TitleBarAction};
 use crate::status::StatusPanel;
 use crate::theme::QvodTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppPage {
     Player,
-    Playlist,
     Settings,
     Status,
 }
@@ -71,10 +70,12 @@ impl QvodApp {
     }
 
     pub fn play_uri(&mut self, uri: &str, title: &str) {
-        self.playlist.add(crate::playlist::PlaylistEntry::new(
-            uri.into(),
-            title.into(),
-        ));
+        self.playlist.add(TaskEntry {
+            uri: uri.into(),
+            title: title.into(),
+            status: TaskStatus::Downloading,
+            ..Default::default()
+        });
         self.player_state = PlayerState::Buffering;
     }
 
@@ -155,15 +156,23 @@ impl eframe::App for QvodApp {
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.page, AppPage::Player, "▶ Player");
-                ui.selectable_value(&mut self.page, AppPage::Playlist, "☰ Playlist");
                 ui.selectable_value(&mut self.page, AppPage::Settings, "⚙ Settings");
                 ui.selectable_value(&mut self.page, AppPage::Status, "📊 Status");
             });
         });
 
+        egui::SidePanel::right("task_list")
+            .resizable(true)
+            .default_width(300.0)
+            .min_width(280.0)
+            .max_width(400.0)
+            .frame(egui::Frame::none().fill(palette::SIDEBAR_BG))
+            .show(ctx, |ui| {
+                self.playlist.ui(ui, &*self.skin);
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| match self.page {
             AppPage::Player => self.player.ui(ui, &self.player_state),
-            AppPage::Playlist => self.playlist.ui(ui),
             AppPage::Settings => self.settings.ui(ui, &mut self.theme),
             AppPage::Status => self.status.ui(ui),
         });

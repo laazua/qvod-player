@@ -1,33 +1,12 @@
-use std::time::Instant;
-
 use eframe::egui;
 
-const MAX_HISTORY: usize = 100;
-
-#[derive(Debug, Clone)]
-pub struct PlaylistEntry {
-    pub uri: String,
-    pub title: String,
-    pub duration_ms: u64,
-    pub added_at: Instant,
-}
-
-impl PlaylistEntry {
-    #[must_use]
-    pub fn new(uri: String, title: String) -> Self {
-        Self {
-            uri,
-            title,
-            duration_ms: 0,
-            added_at: Instant::now(),
-        }
-    }
-}
+use crate::skin::{SkinEngine, TaskAction, TaskEntry};
 
 #[derive(Debug)]
 pub struct PlaylistManager {
-    entries: Vec<PlaylistEntry>,
-    current_index: Option<usize>,
+    entries: Vec<TaskEntry>,
+    selected: Option<usize>,
+    tab_active: usize,
     history: Vec<String>,
 }
 
@@ -36,80 +15,48 @@ impl PlaylistManager {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
-            current_index: None,
-            history: Vec::with_capacity(MAX_HISTORY),
+            selected: None,
+            tab_active: 0,
+            history: Vec::new(),
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("➕ Add").clicked() {
-                // TODO: Show file picker or URI input
-            }
-            if ui.button("🗑 Clear").clicked() {
-                self.entries.clear();
-                self.current_index = None;
-            }
-            if let Some(idx) = self.current_index {
-                if ui.button("✕ Remove").clicked() {
-                    self.entries.remove(idx);
-                    self.current_index = None;
-                }
-                if ui.button("▶ Play").clicked() {
-                    // Play selected entry
-                }
-            }
-        });
+    pub fn ui(&mut self, ui: &mut egui::Ui, skin: &dyn SkinEngine) {
+        let tabs = &["正在播放", "网络任务"];
+        skin.draw_tab_bar(ui, tabs, &mut self.tab_active);
 
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            let mut to_remove: Option<usize> = None;
-            for (idx, entry) in self.entries.iter().enumerate() {
-                let selected = self.current_index == Some(idx);
-                let response = ui.selectable_label(selected, &entry.title);
-                if response.clicked() {
-                    self.current_index = Some(idx);
+            let mut action: Option<TaskAction> = None;
+            for (i, entry) in self.entries.iter().enumerate() {
+                let result = skin.draw_task_entry(ui, entry, i, self.selected == Some(i));
+                if !matches!(result, TaskAction::None) {
+                    action = Some(result);
                 }
-                response.context_menu(|ui| {
-                    if ui.button("Play").clicked() {
-                        self.current_index = Some(idx);
-                        ui.close_menu();
-                    }
-                    if ui.button("Copy URI").clicked() {
-                        ui.close_menu();
-                    }
-                    if ui.button("Remove").clicked() {
-                        to_remove = Some(idx);
-                        ui.close_menu();
-                    }
-                });
             }
-            if let Some(idx) = to_remove {
-                self.entries.remove(idx);
-                if self.current_index == Some(idx) {
-                    self.current_index = None;
-                } else if let Some(cur) = self.current_index {
-                    if idx < cur {
-                        self.current_index = Some(cur - 1);
-                    }
+            if let Some(act) = action {
+                match act {
+                    TaskAction::Select(idx) => self.selected = Some(idx),
+                    TaskAction::ContextMenu(_idx) => { /* show context menu */ }
+                    _ => {}
                 }
             }
         });
     }
 
-    pub fn add(&mut self, entry: PlaylistEntry) {
+    pub fn add(&mut self, entry: TaskEntry) {
         self.entries.push(entry);
     }
 
     pub fn remove(&mut self, index: usize) {
         if index < self.entries.len() {
             self.entries.remove(index);
-            if let Some(current) = self.current_index {
-                if index < current {
-                    self.current_index = Some(current - 1);
-                } else if index == current {
-                    self.current_index = None;
+            if let Some(selected) = self.selected {
+                if index < selected {
+                    self.selected = Some(selected - 1);
+                } else if index == selected {
+                    self.selected = None;
                 }
             }
         }
@@ -117,15 +64,15 @@ impl PlaylistManager {
 
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.current_index = None;
+        self.selected = None;
     }
 
-    pub fn play(&mut self, index: usize) -> Option<&PlaylistEntry> {
+    pub fn play(&mut self, index: usize) -> Option<&TaskEntry> {
         if index < self.entries.len() {
-            self.current_index = Some(index);
+            self.selected = Some(index);
             let entry = &self.entries[index];
             self.history.push(entry.uri.clone());
-            if self.history.len() > MAX_HISTORY {
+            if self.history.len() > 100 {
                 self.history.remove(0);
             }
             Some(entry)
@@ -135,12 +82,12 @@ impl PlaylistManager {
     }
 
     #[must_use]
-    pub fn current(&self) -> Option<&PlaylistEntry> {
-        self.current_index.map(|i| &self.entries[i])
+    pub fn current(&self) -> Option<&TaskEntry> {
+        self.selected.map(|i| &self.entries[i])
     }
 
     #[must_use]
-    pub fn entries(&self) -> &[PlaylistEntry] {
+    pub fn entries(&self) -> &[TaskEntry] {
         &self.entries
     }
 
@@ -157,11 +104,11 @@ impl PlaylistManager {
     pub fn move_up(&mut self, index: usize) {
         if index > 0 && index < self.entries.len() {
             self.entries.swap(index, index - 1);
-            if let Some(current) = self.current_index {
-                if current == index {
-                    self.current_index = Some(index - 1);
-                } else if current == index - 1 {
-                    self.current_index = Some(index);
+            if let Some(selected) = self.selected {
+                if selected == index {
+                    self.selected = Some(index - 1);
+                } else if selected == index - 1 {
+                    self.selected = Some(index);
                 }
             }
         }
@@ -170,11 +117,11 @@ impl PlaylistManager {
     pub fn move_down(&mut self, index: usize) {
         if index + 1 < self.entries.len() {
             self.entries.swap(index, index + 1);
-            if let Some(current) = self.current_index {
-                if current == index {
-                    self.current_index = Some(index + 1);
-                } else if current == index + 1 {
-                    self.current_index = Some(index);
+            if let Some(selected) = self.selected {
+                if selected == index {
+                    self.selected = Some(index + 1);
+                } else if selected == index + 1 {
+                    self.selected = Some(index);
                 }
             }
         }
@@ -199,14 +146,25 @@ impl Default for PlaylistManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::skin::TaskStatus;
+
+    fn make_entry(title: &str, uri: &str) -> TaskEntry {
+        TaskEntry {
+            title: title.into(),
+            uri: uri.into(),
+            status: TaskStatus::Downloading,
+            progress: 0.0,
+            downloaded: 0,
+            total: 0,
+            speed_down: 0.0,
+            speed_up: 0.0,
+        }
+    }
 
     #[test]
     fn test_add_and_play() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new(
-            "qvod://hash|test.mp4|1024|mp4|".into(),
-            "Test".into(),
-        ));
+        pm.add(make_entry("Test", "qvod://hash|test.mp4|1024|mp4|"));
         assert_eq!(pm.len(), 1);
         let entry = pm.play(0);
         assert!(entry.is_some());
@@ -216,8 +174,8 @@ mod tests {
     #[test]
     fn test_remove() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new("uri1".into(), "A".into()));
-        pm.add(PlaylistEntry::new("uri2".into(), "B".into()));
+        pm.add(make_entry("A", "uri1"));
+        pm.add(make_entry("B", "uri2"));
         pm.remove(1);
         assert_eq!(pm.len(), 1);
     }
@@ -225,7 +183,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new("uri".into(), "A".into()));
+        pm.add(make_entry("A", "uri"));
         pm.clear();
         assert!(pm.is_empty());
     }
@@ -233,8 +191,8 @@ mod tests {
     #[test]
     fn test_move_up() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new("uri1".into(), "A".into()));
-        pm.add(PlaylistEntry::new("uri2".into(), "B".into()));
+        pm.add(make_entry("A", "uri1"));
+        pm.add(make_entry("B", "uri2"));
         pm.move_up(1);
         assert_eq!(pm.entries()[0].title, "B");
     }
@@ -242,8 +200,8 @@ mod tests {
     #[test]
     fn test_move_down() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new("uri1".into(), "A".into()));
-        pm.add(PlaylistEntry::new("uri2".into(), "B".into()));
+        pm.add(make_entry("A", "uri1"));
+        pm.add(make_entry("B", "uri2"));
         pm.move_down(0);
         assert_eq!(pm.entries()[0].title, "B");
     }
@@ -251,8 +209,8 @@ mod tests {
     #[test]
     fn test_history() {
         let mut pm = PlaylistManager::new();
-        pm.add(PlaylistEntry::new("uri1".into(), "A".into()));
-        pm.add(PlaylistEntry::new("uri2".into(), "B".into()));
+        pm.add(make_entry("A", "uri1"));
+        pm.add(make_entry("B", "uri2"));
         pm.play(0);
         pm.play(1);
         assert_eq!(pm.history().len(), 2);

@@ -1,7 +1,7 @@
 use eframe::egui::{self, Context, Rect, Sense, Ui};
 
 use super::palette;
-use super::{ContextMenuAction, SkinEngine, TaskAction, TaskEntry, TitleBarAction};
+use super::{ContextMenuAction, SkinEngine, TaskAction, TaskEntry, TaskStatus, TitleBarAction};
 
 pub struct Qvod6Skin;
 
@@ -278,15 +278,126 @@ impl SkinEngine for Qvod6Skin {
         ui.add(btn).clicked()
     }
 
-    fn draw_tab_bar(&self, _ui: &mut Ui, _tabs: &[&str], _active: &mut usize) {}
+    fn draw_tab_bar(&self, ui: &mut Ui, tabs: &[&str], active: &mut usize) {
+        ui.horizontal(|ui| {
+            ui.style_mut().spacing.item_spacing.x = 0.0;
+            for (i, tab) in tabs.iter().enumerate() {
+                let bg = if i == *active {
+                    palette::TAB_ACTIVE_BG
+                } else {
+                    palette::TAB_INACTIVE_BG
+                };
+                let response = egui::Frame::none()
+                    .fill(bg)
+                    .inner_margin(egui::Margin::symmetric(12.0, 4.0))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(*tab)
+                                .color(palette::TEXT_PRIMARY)
+                                .size(12.0),
+                        );
+                    })
+                    .response;
+                if response.clicked() {
+                    *active = i;
+                }
+            }
+        });
+    }
 
     fn draw_task_entry(
         &self,
-        _ui: &mut Ui,
-        _entry: &TaskEntry,
-        _index: usize,
-        _selected: bool,
+        ui: &mut Ui,
+        entry: &TaskEntry,
+        index: usize,
+        selected: bool,
     ) -> TaskAction {
+        let height = 52.0;
+        let width = ui.available_width();
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+        let painter = ui.painter_at(rect);
+
+        let bg = if selected {
+            palette::LIST_ENTRY_SELECTED
+        } else if rect
+            .contains(ui.input(|i| i.pointer.hover_pos().unwrap_or(egui::pos2(-1.0, -1.0))))
+        {
+            palette::LIST_ENTRY_HOVER
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        painter.rect_filled(rect, 0.0, bg);
+
+        let icon = match entry.status {
+            TaskStatus::Downloading => "▶",
+            TaskStatus::Paused => "⏸",
+            TaskStatus::Completed => "✓",
+            TaskStatus::Error(_) => "⚠",
+        };
+        let icon_color = match entry.status {
+            TaskStatus::Completed => palette::SUCCESS,
+            TaskStatus::Error(_) => palette::ERROR,
+            _ => palette::BTN_HOVER,
+        };
+        painter.text(
+            egui::pos2(rect.min.x + 8.0, rect.min.y + 10.0),
+            egui::Align2::LEFT_TOP,
+            icon,
+            egui::FontId::proportional(14.0),
+            icon_color,
+        );
+
+        painter.text(
+            egui::pos2(rect.min.x + 28.0, rect.min.y + 8.0),
+            egui::Align2::LEFT_TOP,
+            &entry.title,
+            egui::FontId::proportional(12.0),
+            palette::TEXT_PRIMARY,
+        );
+
+        let info = match entry.status {
+            TaskStatus::Downloading => {
+                format!(
+                    "{:.1}/{:.1}MB ↓{:.0}KB/s",
+                    entry.downloaded as f64 / 1_048_576.0,
+                    entry.total as f64 / 1_048_576.0,
+                    entry.speed_down / 1024.0
+                )
+            }
+            TaskStatus::Completed => "已下载  ✓".into(),
+            TaskStatus::Paused => "已暂停".into(),
+            TaskStatus::Error(ref e) => format!("错误: {e}"),
+        };
+        painter.text(
+            egui::pos2(rect.min.x + 28.0, rect.min.y + 26.0),
+            egui::Align2::LEFT_TOP,
+            info,
+            egui::FontId::proportional(10.0),
+            palette::TEXT_SECONDARY,
+        );
+
+        let bar_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x + 8.0, rect.max.y - 8.0),
+            egui::vec2(rect.width() - 16.0, 4.0),
+        );
+        painter.rect_filled(bar_rect, 2.0, palette::PROGRESS_BG);
+        if entry.progress > 0.0 {
+            let fill = egui::Rect::from_min_size(
+                bar_rect.min,
+                egui::vec2(bar_rect.width() * entry.progress as f32, 4.0),
+            );
+            painter.rect_filled(fill, 2.0, palette::PROGRESS_FILL);
+        }
+
+        if selected && ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary)) {
+            return TaskAction::ContextMenu(index);
+        }
+
+        if response.clicked() {
+            return TaskAction::Select(index);
+        }
+
         TaskAction::None
     }
 

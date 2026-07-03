@@ -9,7 +9,13 @@ pub enum TaskStatus {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
+impl Default for TaskStatus {
+    fn default() -> Self {
+        Self::Downloading
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct TaskEntry {
     pub title: String,
     pub uri: String,
