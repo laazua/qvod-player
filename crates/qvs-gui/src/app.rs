@@ -4,6 +4,7 @@ use eframe::Frame;
 use crate::player::PlayerPanel;
 use crate::playlist::PlaylistManager;
 use crate::settings::AppSettings;
+use crate::skin::{Qvod6Skin, SkinEngine, TitleBarAction};
 use crate::status::StatusPanel;
 use crate::theme::QvodTheme;
 
@@ -31,6 +32,7 @@ pub struct QvodApp {
     pub playlist: PlaylistManager,
     pub status: StatusPanel,
     pub theme: QvodTheme,
+    pub skin: Box<dyn SkinEngine>,
     page: AppPage,
     player_state: PlayerState,
 }
@@ -46,6 +48,7 @@ impl QvodApp {
             playlist: PlaylistManager::new(),
             status: StatusPanel::new(),
             theme: QvodTheme::Dark,
+            skin: Box::new(Qvod6Skin::new()),
             page: AppPage::Player,
             player_state: PlayerState::Stopped,
         };
@@ -106,7 +109,27 @@ impl QvodApp {
 
 impl eframe::App for QvodApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        self.theme.apply(ctx);
+        self.skin.apply_style(ctx);
+
+        let title_bar_action = egui::TopBottomPanel::top("title_bar")
+            .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
+            .show(ctx, |ui| self.skin.draw_title_bar(ui, "QVOD Player"))
+            .inner;
+        match title_bar_action {
+            TitleBarAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            TitleBarAction::Maximize => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+            TitleBarAction::Minimize => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            TitleBarAction::Drag => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            TitleBarAction::None => {}
+        }
 
         let (space, right, left, escape) = ctx.input(|i| {
             (

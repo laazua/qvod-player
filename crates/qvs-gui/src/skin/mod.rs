@@ -73,11 +73,21 @@ pub trait SkinEngine: Send + Sync {
     fn draw_volume_control(&self, ui: &mut Ui, volume: &mut f32, muted: &mut bool);
     fn draw_fullscreen_button(&self, ui: &mut Ui) -> bool;
     fn draw_tab_bar(&self, ui: &mut Ui, tabs: &[&str], active: &mut usize);
-    fn draw_task_entry(&self, ui: &mut Ui, entry: &TaskEntry, index: usize, selected: bool) -> TaskAction;
+    fn draw_task_entry(
+        &self,
+        ui: &mut Ui,
+        entry: &TaskEntry,
+        index: usize,
+        selected: bool,
+    ) -> TaskAction;
     fn draw_buffering_overlay(&self, painter: &egui::Painter, area: Rect, time: f64);
     fn draw_error_overlay(&self, painter: &egui::Painter, area: Rect, msg: &str);
     fn draw_info_overlay(&self, painter: &egui::Painter, area: Rect, info: &str);
-    fn draw_context_menu(&self, ui: &mut Ui, items: &[(&str, Vec<ContextMenuAction>)]) -> Option<ContextMenuAction>;
+    fn draw_context_menu(
+        &self,
+        ui: &mut Ui,
+        items: &[(&str, Vec<ContextMenuAction>)],
+    ) -> Option<ContextMenuAction>;
 }
 
 pub use palette::*;
