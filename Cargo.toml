@@ -44,6 +44,7 @@ dirs = "5"
 zstd = "0.13"
 lru = "0.12"
 futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

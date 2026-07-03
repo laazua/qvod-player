@@ -19,6 +19,7 @@ pub struct PlayerControls {
     pub position_ms: u64,
     pub duration_ms: u64,
     pub buffered_seconds: f64,
+    pub fullscreen: bool,
 }
 
 use crate::skin::SkinEngine;
@@ -34,6 +35,7 @@ impl PlayerControls {
             position_ms: 0,
             duration_ms,
             buffered_seconds: 0.0,
+            fullscreen: false,
         }
     }
 
@@ -63,7 +65,9 @@ impl PlayerControls {
             skin.draw_volume_control(ui, &mut self.volume, &mut self.muted);
 
             if skin.draw_fullscreen_button(ui) {
-                // Toggle fullscreen
+                self.fullscreen = !self.fullscreen;
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
         });
     }
