@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use eframe::egui::{self, Context, Rect, Sense, Ui};
 use std::f64::consts::TAU;
 
@@ -36,6 +38,9 @@ impl SkinEngine for Qvod6Skin {
     }
 
     fn draw_title_bar(&self, ui: &mut Ui, title: &str) -> TitleBarAction {
+        // Lazy-loaded title bar icon from the embedded qvod.ico
+        static TITLE_ICON: OnceLock<egui::TextureHandle> = OnceLock::new();
+
         let height = 32.0;
         let rect = ui
             .allocate_exact_size(
@@ -53,11 +58,25 @@ impl SkinEngine for Qvod6Skin {
             ],
             egui::Stroke::new(1.0, palette::TITLE_BAR_SEPARATOR),
         );
+        let tex = TITLE_ICON.get_or_init(|| {
+            let image = crate::icon::color_image_small().clone();
+            ui.ctx()
+                .load_texture("title_icon", image, egui::TextureOptions::NEAREST)
+        });
 
+        // Draw title-bar icon at its native 16×16
+        let icon_size = 16.0;
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.min.x + 12.0, rect.center().y),
+            egui::vec2(icon_size, icon_size),
+        );
+        egui::Image::from_texture(tex).paint_at(ui, icon_rect);
+
+        // Title text after the icon
         painter.text(
-            egui::pos2(rect.min.x + 8.0, rect.center().y),
+            egui::pos2(rect.min.x + 24.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            format!("[Q] {title}"),
+            title,
             egui::FontId::proportional(13.0),
             palette::TEXT_PRIMARY,
         );
@@ -78,12 +97,35 @@ impl SkinEngine for Qvod6Skin {
         } else {
             palette::BTN_DEFAULT
         };
-        painter.text(
-            close_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "✕",
-            egui::FontId::proportional(14.0),
-            close_color,
+        if close_response.hovered() {
+            painter.rect_filled(
+                close_rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(0xE8, 0x11, 0x23, 200),
+            );
+        }
+        // Draw close X
+        let cx = close_rect.center().x;
+        let cy = close_rect.center().y;
+        let half = 5.5;
+        let close_line_color = if close_response.hovered() {
+            egui::Color32::WHITE
+        } else {
+            close_color
+        };
+        painter.line_segment(
+            [
+                egui::pos2(cx - half, cy - half),
+                egui::pos2(cx + half, cy + half),
+            ],
+            egui::Stroke::new(1.5, close_line_color),
+        );
+        painter.line_segment(
+            [
+                egui::pos2(cx + half, cy - half),
+                egui::pos2(cx - half, cy + half),
+            ],
+            egui::Stroke::new(1.5, close_line_color),
         );
 
         let max_color = if max_response.hovered() {
@@ -91,25 +133,39 @@ impl SkinEngine for Qvod6Skin {
         } else {
             palette::BTN_DEFAULT
         };
-        painter.text(
-            max_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "□",
-            egui::FontId::proportional(14.0),
-            max_color,
-        );
+        if max_response.hovered() {
+            painter.rect_filled(
+                max_rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(0xFF, 0xFF, 0xFF, 20),
+            );
+        }
+        // Draw maximize square
+        let cx = max_rect.center().x;
+        let cy = max_rect.center().y;
+        let half = 5.5;
+        let square =
+            egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(half * 2.0, half * 2.0));
+        painter.rect_stroke(square, 1.0, egui::Stroke::new(1.5, max_color));
 
         let min_color = if min_response.hovered() {
             palette::BTN_HOVER
         } else {
             palette::BTN_DEFAULT
         };
-        painter.text(
-            min_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "─",
-            egui::FontId::proportional(14.0),
-            min_color,
+        if min_response.hovered() {
+            painter.rect_filled(
+                min_rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(0xFF, 0xFF, 0xFF, 20),
+            );
+        }
+        // Draw minimize line
+        let cx = min_rect.center().x;
+        let cy = min_rect.center().y;
+        painter.line_segment(
+            [egui::pos2(cx - 6.5, cy), egui::pos2(cx + 6.5, cy)],
+            egui::Stroke::new(1.5, min_color),
         );
 
         if close_response.clicked() {
@@ -142,14 +198,43 @@ impl SkinEngine for Qvod6Skin {
         };
         painter.circle_filled(rect.center(), 16.0, bg);
 
-        let text = if playing { "⏸" } else { "▶" };
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            egui::FontId::proportional(16.0),
-            palette::BG_GRADIENT_TOP,
-        );
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+        let icon_color = palette::CONTROL_BAR_BG;
+
+        if playing {
+            // Pause: two rounded vertical bars
+            let bar_w = 3.0;
+            let bar_h = 9.0;
+            let gap = 2.5;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(cx - gap / 2.0 - bar_w / 2.0, cy),
+                    egui::vec2(bar_w, bar_h),
+                ),
+                1.0,
+                icon_color,
+            );
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(cx + gap / 2.0 + bar_w / 2.0, cy),
+                    egui::vec2(bar_w, bar_h),
+                ),
+                1.0,
+                icon_color,
+            );
+        } else {
+            // Play: right-pointing triangle
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(cx - 3.5, cy - 5.5),
+                    egui::pos2(cx - 3.5, cy + 5.5),
+                    egui::pos2(cx + 5.5, cy),
+                ],
+                icon_color,
+                egui::Stroke::new(0.0, egui::Color32::TRANSPARENT),
+            ));
+        }
 
         response.clicked()
     }
@@ -163,11 +248,11 @@ impl SkinEngine for Qvod6Skin {
         } else {
             palette::BTN_DEFAULT
         };
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "■",
-            egui::FontId::proportional(18.0),
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+        painter.rect_filled(
+            egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(8.0, 8.0)),
+            1.5,
             color,
         );
         response.clicked()
@@ -229,42 +314,88 @@ impl SkinEngine for Qvod6Skin {
 
     fn draw_volume_control(&self, ui: &mut Ui, volume: &mut f32, muted: &mut bool) {
         ui.horizontal(|ui| {
-            let icon = if *muted {
-                "🔇"
-            } else if *volume < 0.33 {
-                "🔈"
-            } else if *volume < 0.66 {
-                "🔉"
-            } else {
-                "🔊"
-            };
-            if ui
-                .add(egui::Button::new(icon).min_size(egui::vec2(28.0, 28.0)))
-                .clicked()
+            // Drawn speaker icon (avoids emoji font-dependency on Windows).
+            let (icon_rect, icon_response) =
+                ui.allocate_exact_size(egui::vec2(28.0, 28.0), Sense::click());
             {
+                let painter = ui.painter_at(icon_rect);
+                let cx = icon_rect.center().x;
+                let cy = icon_rect.center().y;
+                let c = if *muted {
+                    palette::TEXT_SECONDARY
+                } else {
+                    palette::BTN_HOVER
+                };
+
+                // Speaker body (small rounded rect)
+                let speaker =
+                    egui::Rect::from_center_size(egui::pos2(cx - 3.0, cy), egui::vec2(4.0, 7.0));
+                painter.rect_filled(speaker, 1.0, c);
+
+                // Speaker cone (triangle)
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(cx - 1.0, cy - 3.5),
+                        egui::pos2(cx - 1.0, cy + 3.5),
+                        egui::pos2(cx + 4.0, cy),
+                    ],
+                    c,
+                    egui::Stroke::new(0.0, egui::Color32::TRANSPARENT),
+                ));
+
+                // Sound-wave arcs (only when unmuted)
+                if !*muted && *volume > 0.0 {
+                    let alpha_base = (40.0 + *volume * 180.0) as u8;
+                    for i in 0..3 {
+                        let r = 5.0 + i as f32 * 2.5;
+                        let alpha = alpha_base.saturating_sub(i as u8 * 60);
+                        painter.circle_stroke(
+                            egui::pos2(cx + 4.0, cy),
+                            r,
+                            egui::Stroke::new(
+                                1.2,
+                                egui::Color32::from_rgba_premultiplied(c.r(), c.g(), c.b(), alpha),
+                            ),
+                        );
+                    }
+                }
+            }
+            if icon_response.clicked() {
                 *muted = !*muted;
             }
 
-            let slider_width = 80.0;
-            let slider_height = 6.0;
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(slider_width, slider_height),
-                Sense::click_and_drag(),
-            );
+            // Slider track
+            let slider_w = 80.0;
+            let slider_h = 6.0;
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(slider_w, slider_h), Sense::click_and_drag());
             let painter = ui.painter_at(rect);
 
+            // Background track
             painter.rect_filled(rect, 3.0, palette::VOLUME_SLIDER_BG);
-            let effective_vol = if *muted { 0.0 } else { *volume };
-            let fill_rect = egui::Rect::from_min_size(
-                rect.min,
-                egui::vec2(rect.width() * effective_vol, slider_height),
-            );
-            painter.rect_filled(fill_rect, 3.0, palette::VOLUME_SLIDER_FILL);
 
-            let thumb_center =
-                egui::pos2(rect.min.x + rect.width() * effective_vol, rect.center().y);
-            painter.circle_filled(thumb_center, 4.0, palette::BTN_HOVER);
+            // Filled portion
+            let effective = if *muted { 0.0 } else { *volume };
+            if effective > 0.0 {
+                let fill = egui::Rect::from_min_size(
+                    rect.min,
+                    egui::vec2(rect.width() * effective, slider_h),
+                );
+                painter.rect_filled(fill, 3.0, palette::VOLUME_SLIDER_FILL);
+            }
 
+            // Thumb knob with ring
+            let thumb_x = rect.min.x + rect.width() * effective;
+            let thumb_center = egui::pos2(thumb_x, rect.center().y);
+            painter.circle_filled(thumb_center, 5.0, palette::BTN_HOVER);
+            let ring_color = if *muted {
+                palette::TEXT_SECONDARY
+            } else {
+                palette::BTN_HOVER
+            };
+            painter.circle_stroke(thumb_center, 5.0, egui::Stroke::new(1.5, ring_color));
+
+            // Interaction
             if let Some(mouse_pos) = response.interact_pointer_pos() {
                 let rel = ((mouse_pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
                 *volume = rel;
@@ -274,9 +405,34 @@ impl SkinEngine for Qvod6Skin {
     }
 
     fn draw_fullscreen_button(&self, ui: &mut Ui) -> bool {
-        let btn = egui::Button::new(egui::RichText::new("□").color(palette::BTN_DEFAULT))
-            .min_size(egui::vec2(28.0, 28.0));
-        ui.add(btn).clicked()
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), Sense::click());
+        let painter = ui.painter_at(rect);
+        let color = if response.hovered() {
+            palette::BTN_HOVER
+        } else {
+            palette::BTN_DEFAULT
+        };
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+        // Fullscreen: small square with outward corner brackets
+        let s = egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(9.0, 9.0));
+        painter.rect_stroke(s, 0.0, egui::Stroke::new(1.5, color));
+        // Top-left corner extension
+        painter.line_segment(
+            [
+                egui::pos2(s.min.x - 2.0, s.min.y),
+                egui::pos2(s.min.x - 2.0, s.min.y - 2.0),
+            ],
+            egui::Stroke::new(1.5, color),
+        );
+        painter.line_segment(
+            [
+                egui::pos2(s.min.x, s.min.y - 2.0),
+                egui::pos2(s.min.x - 2.0, s.min.y - 2.0),
+            ],
+            egui::Stroke::new(1.5, color),
+        );
+        response.clicked()
     }
 
     fn draw_tab_bar(&self, ui: &mut Ui, tabs: &[&str], active: &mut usize) {

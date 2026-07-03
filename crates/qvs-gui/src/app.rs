@@ -119,6 +119,62 @@ impl eframe::App for QvodApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.theme.apply(ctx);
 
+        // ── Frameless window resize (drag edges/corners) ───────────
+        // Since the window uses custom decorations (no native frame),
+        // we must detect mouse-at-edge and initiate OS resize manually.
+        {
+            const RESIZE_MARGIN: f32 = 8.0;
+            let screen = ctx.screen_rect();
+            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                let near_left = pos.x <= screen.min.x + RESIZE_MARGIN;
+                let near_right = pos.x >= screen.max.x - RESIZE_MARGIN;
+                let near_top = pos.y <= screen.min.y + RESIZE_MARGIN;
+                let near_bottom = pos.y >= screen.max.y - RESIZE_MARGIN;
+
+                // Map the 4 booleans to a ResizeDirection; corners win.
+                let dir: Option<egui::viewport::ResizeDirection> =
+                    match (near_left, near_right, near_top, near_bottom) {
+                        (true, _, true, _) => Some(egui::viewport::ResizeDirection::NorthWest),
+                        (true, _, _, true) => Some(egui::viewport::ResizeDirection::SouthWest),
+                        (_, true, true, _) => Some(egui::viewport::ResizeDirection::NorthEast),
+                        (_, true, _, true) => Some(egui::viewport::ResizeDirection::SouthEast),
+                        (true, _, _, _) => Some(egui::viewport::ResizeDirection::West),
+                        (_, true, _, _) => Some(egui::viewport::ResizeDirection::East),
+                        (_, _, true, _) => Some(egui::viewport::ResizeDirection::North),
+                        (_, _, _, true) => Some(egui::viewport::ResizeDirection::South),
+                        _ => None,
+                    };
+
+                if let Some(direction) = dir {
+                    // Set the appropriate OS resize cursor.
+                    let cursor = match direction {
+                        egui::viewport::ResizeDirection::North
+                        | egui::viewport::ResizeDirection::South => {
+                            egui::CursorIcon::ResizeVertical
+                        }
+                        egui::viewport::ResizeDirection::East
+                        | egui::viewport::ResizeDirection::West => {
+                            egui::CursorIcon::ResizeHorizontal
+                        }
+                        egui::viewport::ResizeDirection::NorthEast
+                        | egui::viewport::ResizeDirection::SouthWest => {
+                            egui::CursorIcon::ResizeNeSw
+                        }
+                        egui::viewport::ResizeDirection::NorthWest
+                        | egui::viewport::ResizeDirection::SouthEast => {
+                            egui::CursorIcon::ResizeNwSe
+                        }
+                    };
+                    ctx.set_cursor_icon(cursor);
+
+                    // Start native OS resize on primary click.
+                    if ctx.input(|i| i.pointer.primary_clicked()) {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+                    }
+                }
+            }
+        }
+
         let title_bar_action = egui::TopBottomPanel::top("title_bar")
             .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
             .show(ctx, |ui| self.skin.draw_title_bar(ui, "QVOD Player"))
@@ -160,6 +216,29 @@ impl eframe::App for QvodApp {
             self.on_keypress(egui::Key::Escape);
         }
 
+        // ── Zoom keyboard shortcuts (Ctrl + = / - / 0) ──────────────
+        let zoom_in = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Plus));
+        let zoom_out = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Minus));
+        let zoom_reset = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Num0));
+
+        if zoom_in {
+            self.player.zoom_in();
+        }
+        if zoom_out {
+            self.player.zoom_out();
+        }
+        if zoom_reset {
+            self.player.reset_zoom();
+        }
+
+        // ── Fullscreen keyboard shortcut ────────────────────────────
+        if ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+            self.player.controls.fullscreen = !self.player.controls.fullscreen;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                self.player.controls.fullscreen,
+            ));
+        }
+
         egui::TopBottomPanel::top("menu_bar")
             .frame(egui::Frame::none().fill(palette::CONTROL_BAR_BG))
             .show(ctx, |ui| {
@@ -188,19 +267,39 @@ impl eframe::App for QvodApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("全屏").clicked() {
+                        if ui.button("全屏 (F11)").clicked() {
+                            self.player.controls.fullscreen = !self.player.controls.fullscreen;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                                self.player.controls.fullscreen,
+                            ));
                             ui.close_menu();
                         }
                     });
                     ui.menu_button("控制", |ui| {
                         ui.menu_button("画面比例", |ui| {
-                            if ui.button("4:3").clicked() {
+                            for &ar in crate::player::AspectRatio::variants() {
+                                let label = if ar == self.player.aspect_ratio {
+                                    format!("✓ {}", ar.label())
+                                } else {
+                                    ar.label().to_string()
+                                };
+                                if ui.button(label).clicked() {
+                                    self.player.aspect_ratio = ar;
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.menu_button("缩放", |ui| {
+                            if ui.button("放大 (Ctrl+=)").clicked() {
+                                self.player.zoom_in();
                                 ui.close_menu();
                             }
-                            if ui.button("16:9").clicked() {
+                            if ui.button("缩小 (Ctrl+-)").clicked() {
+                                self.player.zoom_out();
                                 ui.close_menu();
                             }
-                            if ui.button("原始").clicked() {
+                            if ui.button("适应窗口 (Ctrl+0)").clicked() {
+                                self.player.reset_zoom();
                                 ui.close_menu();
                             }
                         });
