@@ -1,5 +1,7 @@
-use eframe::egui::{self, Color32, Style, Visuals};
+use eframe::egui::{self, Color32, Visuals};
 
+/// Deprecated: being superseded by [`crate::skin::SkinEngine`].
+/// Kept for backward compatibility with settings.rs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QvodTheme {
     Dark,
@@ -49,16 +51,6 @@ impl QvodTheme {
     }
 }
 
-#[must_use]
-pub fn apply_theme(style: &mut Style, _theme: QvodTheme) {
-    style.visuals = Visuals::dark();
-}
-
-pub const ACCENT: Color32 = Color32::from_rgb(0x00, 0x96, 0x88);
-pub const SUCCESS: Color32 = Color32::from_rgb(0x4C, 0xAF, 0x50);
-pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0x98, 0x00);
-pub const ERROR: Color32 = Color32::from_rgb(0xF4, 0x43, 0x36);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,17 +58,5 @@ mod tests {
     #[test]
     fn test_default_theme() {
         assert_eq!(QvodTheme::default(), QvodTheme::Dark);
-    }
-
-    #[test]
-    fn test_apply_dark() {
-        let mut style = Style::default();
-        apply_theme(&mut style, QvodTheme::Dark);
-    }
-
-    #[test]
-    fn test_apply_light() {
-        let mut style = Style::default();
-        apply_theme(&mut style, QvodTheme::Light);
     }
 }
