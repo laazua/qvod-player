@@ -100,6 +100,7 @@ mod tests {
             width: 1920,
             height: 1080,
             bitrate: 1000000,
+            from_cache: false,
         }
     }
 

@@ -18,30 +18,48 @@
 qvs/
 ├── crates/
 │   ├── qvs-core/           # 基础类型、trait、错误类型
-│   ├── qvs-dht/            # Kademlia DHT 网络
-│   ├── qvs-tracker/        # HTTP Tracker 客户端
-│   ├── qvs-transport/      # P2SP TCP+UDP 传输层
-│   ├── qvs-stream/         # 流媒体引擎
-│   ├── qvs-local-server/   # 本地 HTTP 网关
-│   ├── qvs-media/          # 音视频解码 (FFmpeg)
-│   ├── qvs-gui/            # GUI 播放器 (egui)
-│   └── qvs-format/         # URI、Bencode、文件格式
+│   ├── qvs-dht/            # Kademlia DHT 网络（路由分裂、迭代查询）
+│   ├── qvs-tracker/        # HTTP Tracker 客户端（重试+负载均衡）
+│   ├── qvs-transport/      # P2SP TCP+UDP 传输层（11种消息、拥塞控制）
+│   ├── qvs-stream/         # 流媒体引擎（集成所有子系统）
+│   ├── qvs-local-server/   # 本地 HTTP 网关（流式/分片/控制）
+│   ├── qvs-media/          # 音视频解码 (FFmpeg stub)
+│   ├── qvs-gui/            # GUI 播放器 (egui 5面板+主题)
+│   └── qvs-format/         # URI、Bencode、缓存管理器
 ├── agents/                 # AI 辅助开发文档
 ├── docs/                   # 技术参考文档
 └── tests/                  # 集成测试
 ```
 
-## 构建
+## 快速开始
 
 ```bash
+# 构建
 cargo build --release
-cargo test --workspace
+
+# 启动服务器
+./target/release/qvs-server --port 8621
+
+# 或启动 GUI 播放器
+./target/release/qvs
 ```
+
+更多部署方式详见 [DEPLOY.md](DEPLOY.md)。
+
+## 构建状态
+
+所有 11 个 crate 均已完成，~300 个测试通过，cargo clippy + cargo fmt 干净。
+
+| 二进制 | 路径 | 说明 |
+|--------|------|------|
+| `qvs` | `target/release/qvs` | GUI 播放器 |
+| `qvs-server` | `target/release/qvs-server` | Headless 服务器 |
+| `qvs-cli` | `target/release/qvs-cli` | CLI 客户端 |
 
 ## 系统要求
 
-- Rust 2024 edition
-- FFmpeg 库 (libavcodec, libavformat, libavutil)
+- Rust 1.70+ (2021 edition)
+- FFmpeg 库（可选，仅播放器解码需要）
 - Linux / macOS / Windows
 
 ## 许可

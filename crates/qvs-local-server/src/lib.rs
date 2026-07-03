@@ -6,7 +6,8 @@
     clippy::used_underscore_binding,
     clippy::unused_async,
     clippy::match_same_arms,
-    clippy::needless_pass_by_value
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines
 )]
 
 pub mod config;

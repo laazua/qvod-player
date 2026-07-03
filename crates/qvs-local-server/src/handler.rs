@@ -253,6 +253,27 @@ pub async fn handle_control(
     Json(params): Json<ControlParams>,
 ) -> Json<ControlResponse> {
     match params.action.as_str() {
+        "play" => {
+            if let Some(hash) = &params.hash {
+                let uri = format!("qvod://{hash}||0|mp4|");
+                let mut engine = state.engine.lock().await;
+                match engine.play(&uri).await {
+                    Ok(_stream) => Json(ControlResponse {
+                        success: true,
+                        message: format!("playing {hash}"),
+                    }),
+                    Err(e) => Json(ControlResponse {
+                        success: false,
+                        message: format!("play failed: {e}"),
+                    }),
+                }
+            } else {
+                Json(ControlResponse {
+                    success: false,
+                    message: "hash required".into(),
+                })
+            }
+        }
         "pause" => {
             let mut engine = state.engine.lock().await;
             engine.pause().await;

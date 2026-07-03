@@ -65,8 +65,16 @@ impl QvodEngine {
             match DhtNode::new(dht_config).await {
                 Ok(node) => {
                     let node = Arc::new(node);
-                    // Start background DHT message processing
                     let _handle = node.start().await;
+                    let bootstrap_node = node.clone();
+                    let seed_nodes = config.dht_seed_nodes.clone();
+                    tokio::spawn(async move {
+                        if !seed_nodes.is_empty() {
+                            if let Err(e) = bootstrap_node.bootstrap(&seed_nodes).await {
+                                eprintln!("DHT bootstrap failed: {e}");
+                            }
+                        }
+                    });
                     Some(node)
                 }
                 Err(e) => {

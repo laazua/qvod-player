@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
@@ -50,9 +51,10 @@ impl LocalServer {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
+        let bind_addr = config.bind_address;
         tokio::spawn(async move {
-            let addr = format!("127.0.0.1:{port}");
-            let listener = match TcpListener::bind(&addr).await {
+            let addr = SocketAddr::new(bind_addr, port);
+            let listener = match TcpListener::bind(addr).await {
                 Ok(l) => l,
                 Err(e) => {
                     tracing::error!("Failed to bind {addr}: {e}");

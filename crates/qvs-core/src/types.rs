@@ -374,6 +374,7 @@ pub struct FileMeta {
     pub width: u32,
     pub height: u32,
     pub bitrate: u64,
+    pub from_cache: bool,
 }
 
 #[derive(Debug, Clone)]

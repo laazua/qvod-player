@@ -397,10 +397,49 @@ impl KademliaRpc {
         })
     }
 
-    pub async fn refresh_buckets(&self) {
-        let rt = self.routing_table.lock().await;
-        let list = rt.refresh_list();
-        drop(rt);
+    pub async fn refresh_buckets(&self, socket: &tokio::net::UdpSocket, local_id: &NodeId) {
+        let list = {
+            let rt = self.routing_table.lock().await;
+            rt.refresh_list()
+        };
+
+        for idx in &list {
+            let target = {
+                let mut id = [0u8; 20];
+                id[0] = *idx as u8;
+                id[1] = (*idx >> 8) as u8;
+                NodeId(id)
+            };
+
+            let entries = {
+                let rt = self.routing_table.lock().await;
+                rt.find_closest(&target, K)
+            };
+
+            if entries.is_empty() {
+                continue;
+            }
+
+            let addr = entries[0].addr;
+
+            let msg = DhtMessage::FindNode {
+                header: MessageHeader {
+                    magic: crate::rpc::MAGIC,
+                    msg_type: crate::rpc::MessageType::FindNode,
+                    txn_id: 0,
+                    ver: crate::rpc::PROTOCOL_VERSION,
+                },
+                node_id: *local_id,
+                target,
+            };
+
+            if socket.send_to(&msg.encode(), addr).await.is_ok() {
+                let mut buf = [0u8; 1400];
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut buf)).await;
+            }
+        }
+
         if !list.is_empty() {
             let mut rt = self.routing_table.lock().await;
             for idx in &list {

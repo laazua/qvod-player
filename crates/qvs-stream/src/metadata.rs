@@ -42,6 +42,7 @@ impl MetadataResolver {
             width: 0,
             height: 0,
             bitrate: 0,
+            from_cache: false,
         }
     }
 }

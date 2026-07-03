@@ -351,6 +351,33 @@ impl DhtMessage {
                 | Self::AnnounceResponse { .. }
         )
     }
+
+    #[allow(clippy::manual_let_else)]
+    pub fn error_response(msg: &DhtMessage, _error: &QvodError) -> Option<Self> {
+        let header = match msg {
+            Self::Ping { header, .. }
+            | Self::FindNode { header, .. }
+            | Self::FindPeers { header, .. }
+            | Self::Announce { header, .. } => header,
+            _ => return None,
+        };
+        let node_id = match msg {
+            Self::Ping { node_id, .. }
+            | Self::FindNode { node_id, .. }
+            | Self::FindPeers { node_id, .. }
+            | Self::Announce { node_id, .. } => *node_id,
+            _ => return None,
+        };
+        Some(Self::PingResponse {
+            header: MessageHeader {
+                magic: MAGIC,
+                msg_type: header.msg_type,
+                txn_id: u16::MAX,
+                ver: PROTOCOL_VERSION,
+            },
+            node_id,
+        })
+    }
 }
 
 fn encode_header(header: &MessageHeader) -> Vec<u8> {

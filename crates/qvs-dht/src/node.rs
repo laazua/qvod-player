@@ -113,6 +113,7 @@ impl DhtNode {
         let socket = self.socket.clone();
         let stopped = self.stopped.clone();
         let refresh_interval = self.config.refresh_interval;
+        let local_id = self.local_id;
 
         tokio::spawn(async move {
             let mut buf = [0u8; 1400];
@@ -128,13 +129,24 @@ impl DhtNode {
                     recv_result = socket.recv_from(&mut buf) => {
                         match recv_result {
                             Ok((len, sender)) => {
-                                let mut guard = inner.lock().await;
+                        let mut guard = inner.lock().await;
                                 guard.stats.messages_received += 1;
                                 if let Ok(msg) = crate::rpc::DhtMessage::decode(&buf[..len]) {
-                                    if let Ok(Some(response)) = guard.krpc.handle_message(&msg, sender).await {
-                                        let encoded = response.encode();
-                                        guard.stats.messages_sent += 1;
-                                        let _ = socket.send_to(&encoded, sender).await;
+                                    match guard.krpc.handle_message(&msg, sender).await {
+                                        Ok(Some(response)) => {
+                                            let encoded = response.encode();
+                                            guard.stats.messages_sent += 1;
+                                            let _ = socket.send_to(&encoded, sender).await;
+                                        }
+                                        Ok(None) => {}
+                                        Err(e) => {
+                                            eprintln!("DHT handle_message error: {e}");
+                                            if let Some(err_response) = crate::rpc::DhtMessage::error_response(&msg, &e) {
+                                                let encoded = err_response.encode();
+                                                guard.stats.messages_sent += 1;
+                                                let _ = socket.send_to(&encoded, sender).await;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -143,7 +155,9 @@ impl DhtNode {
                     }
                     _ = refresh_timer.tick() => {
                         let guard = inner.lock().await;
-                        guard.krpc.refresh_buckets().await;
+                        let krpc = guard.krpc.clone();
+                        drop(guard);
+                        krpc.refresh_buckets(&socket, &local_id).await;
                     }
                 }
             }

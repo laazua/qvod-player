@@ -31,7 +31,14 @@ impl FromStr for QvodUri {
             .or_else(|| s.strip_prefix("qvod:"))
             .ok_or_else(|| QvodError::InvalidUri("missing qvod:// prefix".into()))?;
 
-        let parts: Vec<&str> = s.split('|').collect();
+        if !s.ends_with('|') {
+            return Err(QvodError::InvalidUri(
+                "URI must end with trailing pipe '|'".into(),
+            ));
+        }
+
+        let trimmed = s.strip_suffix('|').unwrap_or(s);
+        let parts: Vec<&str> = trimmed.split('|').collect();
         if parts.len() < 4 {
             return Err(QvodError::InvalidUri(format!(
                 "expected at least 4 pipe-delimited parts, got {}",
@@ -104,7 +111,15 @@ mod tests {
     #[test]
     fn test_too_few_parts() {
         let err = "qvod://hash".parse::<QvodUri>().unwrap_err();
-        assert!(err.to_string().contains("expected at least 4"));
+        assert!(err.to_string().contains("trailing pipe"));
+    }
+
+    #[test]
+    fn test_missing_trailing_pipe() {
+        let err = "qvod://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0|file.mp4|1000|mp4"
+            .parse::<QvodUri>()
+            .unwrap_err();
+        assert!(err.to_string().contains("trailing pipe"));
     }
 
     #[test]

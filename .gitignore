@@ -1,7 +1,12 @@
 target/
+dist/
+packages/
 **/*.rs.bk
 .env
 *.swp
 *.swo
 *.qdata
 *.qmv
+*.log
+.DS_Store
+Thumbs.db

@@ -83,6 +83,7 @@ pub fn extract_metadata(_stream: &MediaStream) -> FileMeta {
         width: 0,
         height: 0,
         bitrate: 0,
+        from_cache: false,
     }
 }
 
