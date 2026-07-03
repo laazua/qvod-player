@@ -1,6 +1,7 @@
 use eframe::egui;
 use eframe::Frame;
 
+use crate::client::ServerClient;
 use crate::player::PlayerPanel;
 use crate::playlist::PlaylistManager;
 use crate::settings::AppSettings;
@@ -32,14 +33,19 @@ pub struct QvodApp {
     pub status: StatusPanel,
     pub theme: QvodTheme,
     pub skin: Box<dyn SkinEngine>,
+    pub server_client: Option<ServerClient>,
     page: AppPage,
     player_state: PlayerState,
 }
 
 impl QvodApp {
     #[must_use]
-    pub fn new(startup_uri: Option<String>) -> Self {
-        let settings = AppSettings::load();
+    pub fn new(startup_uri: Option<String>, cli_server_url: Option<String>) -> Self {
+        let settings = AppSettings::load().with_cli_server_url(cli_server_url);
+        let server_client = settings
+            .server_url
+            .as_ref()
+            .map(|url| ServerClient::new(url.clone()));
         let player = PlayerPanel::new();
         let mut app = Self {
             settings,
@@ -48,6 +54,7 @@ impl QvodApp {
             status: StatusPanel::new(),
             theme: QvodTheme::Dark,
             skin: Box::new(Qvod6Skin::new()),
+            server_client,
             page: AppPage::Player,
             player_state: PlayerState::Stopped,
         };
@@ -275,21 +282,21 @@ mod tests {
 
     #[test]
     fn test_app_creation() {
-        let app = QvodApp::new(None);
+        let app = QvodApp::new(None, None);
         assert_eq!(app.page(), AppPage::Player);
         assert_eq!(app.player_state(), PlayerState::Stopped);
     }
 
     #[test]
     fn test_page_navigation() {
-        let mut app = QvodApp::new(None);
+        let mut app = QvodApp::new(None, None);
         app.set_page(AppPage::Settings);
         assert_eq!(app.page(), AppPage::Settings);
     }
 
     #[test]
     fn test_play_uri() {
-        let mut app = QvodApp::new(None);
+        let mut app = QvodApp::new(None, None);
         app.play_uri("qvod://hash|test.mp4|1024|mp4|", "Test Video");
         assert_eq!(app.player_state(), PlayerState::Buffering);
         assert_eq!(app.playlist.len(), 1);
@@ -297,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_keyboard_shortcuts() {
-        let mut app = QvodApp::new(None);
+        let mut app = QvodApp::new(None, None);
         app.on_keypress(egui::Key::Space);
         assert_eq!(app.player_state(), PlayerState::Playing);
         app.on_keypress(egui::Key::Space);

@@ -11,6 +11,9 @@ pub struct NetworkStatus {
     pub download_progress: f64,
     pub dht_table_size: usize,
     pub active_connections: Vec<PeerConnectionInfo>,
+    /// If connected to a remote server, the server URL.
+    pub server_url: Option<String>,
+    pub server_connected: bool,
 }
 
 impl Default for NetworkStatus {
@@ -23,6 +26,8 @@ impl Default for NetworkStatus {
             download_progress: 0.0,
             dht_table_size: 0,
             active_connections: Vec::new(),
+            server_url: None,
+            server_connected: false,
         }
     }
 }
@@ -80,6 +85,23 @@ impl StatusPanel {
             .num_columns(2)
             .spacing([16.0, 6.0])
             .show(ui, |ui| {
+                // Server mode indicator
+                if let Some(ref server_url) = self.status.server_url {
+                    ui.label("Server Mode:");
+                    let color = if self.status.server_connected {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::RED
+                    };
+                    ui.colored_label(color, format!("{} {}", server_url,
+                        if self.status.server_connected { "✓" } else { "✗" }));
+                    ui.end_row();
+                } else {
+                    ui.label("Mode:");
+                    ui.label("Local Engine");
+                    ui.end_row();
+                }
+
                 ui.label("Download Speed:");
                 ui.colored_label(
                     if self.status.download_speed > 1_000_000.0 {

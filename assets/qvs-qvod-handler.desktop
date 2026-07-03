@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=QVOD Player (qvod:// handler)
+Name[zh_CN]=快播播放器 (qvod:// 协议处理)
+Exec=qvs-gui %u
+NoDisplay=true
+MimeType=x-scheme-handler/qvod;

@@ -5,16 +5,27 @@ use qvs_gui::app::QvodApp;
 #[derive(Parser)]
 #[command(name = "qvs", version, about = "Qvod P2SP Player")]
 struct Cli {
+    /// Remote QVOD server URL (e.g. http://192.168.1.100:8621).
+    /// When set, the GUI acts as a thin client connecting to the remote server.
+    /// Can also be set via QVS_SERVER_URL environment variable or baked in at compile time.
+    #[arg(long)]
+    server_url: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Play a qvod:// URI
     Play { uri: String },
+    /// Show engine status
     Status,
+    /// List active streams
     List,
+    /// Manage cache
     Cache { clean: bool, size: Option<u64> },
+    /// Open settings
     Settings,
 }
 
@@ -22,6 +33,9 @@ fn main() -> Result<(), eframe::Error> {
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
+
+    // Check env var if --server-url wasn't provided on CLI
+    let server_url = cli.server_url.or_else(|| std::env::var("QVS_SERVER_URL").ok());
 
     let startup_uri = match &cli.command {
         Some(Commands::Play { uri }) => Some(uri.clone()),
@@ -51,6 +65,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "QVOD Player",
         options,
-        Box::new(move |_cc| Box::new(QvodApp::new(startup_uri))),
+        Box::new(move |_cc| Box::new(QvodApp::new(startup_uri, server_url))),
     )
 }
