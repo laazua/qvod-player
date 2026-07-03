@@ -110,7 +110,7 @@ impl QvodApp {
 
 impl eframe::App for QvodApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        self.skin.apply_style(ctx);
+        self.theme.apply(ctx);
 
         let title_bar_action = egui::TopBottomPanel::top("title_bar")
             .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
@@ -152,6 +152,65 @@ impl eframe::App for QvodApp {
         if escape {
             self.on_keypress(egui::Key::Escape);
         }
+
+        egui::TopBottomPanel::top("menu_bar")
+            .frame(egui::Frame::none().fill(palette::CONTROL_BAR_BG))
+            .show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("文件", |ui| {
+                        if ui.button("打开文件...").clicked() {
+                            ui.close_menu();
+                        }
+                        if ui.button("打开 URL...").clicked() {
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("退出").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            ui.close_menu();
+                        }
+                    });
+                    ui.menu_button("播放", |ui| {
+                        if ui.button("播放").clicked() {
+                            ui.close_menu();
+                        }
+                        if ui.button("暂停").clicked() {
+                            ui.close_menu();
+                        }
+                        if ui.button("停止").clicked() {
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("全屏").clicked() {
+                            ui.close_menu();
+                        }
+                    });
+                    ui.menu_button("控制", |ui| {
+                        ui.menu_button("画面比例", |ui| {
+                            if ui.button("4:3").clicked() {
+                                ui.close_menu();
+                            }
+                            if ui.button("16:9").clicked() {
+                                ui.close_menu();
+                            }
+                            if ui.button("原始").clicked() {
+                                ui.close_menu();
+                            }
+                        });
+                    });
+                    ui.menu_button("设置", |ui| {
+                        if ui.button("偏好设置...").clicked() {
+                            self.set_page(AppPage::Settings);
+                            ui.close_menu();
+                        }
+                    });
+                    ui.menu_button("帮助", |ui| {
+                        if ui.button("关于 QVOD").clicked() {
+                            ui.close_menu();
+                        }
+                    });
+                });
+            });
 
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {

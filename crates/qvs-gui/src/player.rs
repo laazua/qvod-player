@@ -1,6 +1,8 @@
 use eframe::egui;
 use egui::TextureId;
 
+use crate::skin::palette;
+
 use crate::app::PlayerState;
 use crate::controls::PlayerControls;
 use crate::overlay::OverlayManager;
@@ -52,8 +54,7 @@ impl PlayerPanel {
         let available = ui.available_size();
         let (rect, _response) = ui.allocate_exact_size(available, egui::Sense::click());
 
-        ui.painter()
-            .rect_filled(rect, 0.0, egui::Color32::from_rgb(20, 20, 20));
+        ui.painter().rect_filled(rect, 0.0, palette::VIDEO_BG);
 
         if let Some(texture_id) = self.video_texture {
             ui.painter().image(
@@ -84,8 +85,7 @@ impl PlayerPanel {
                 egui::pos2(rect.min.x, rect.max.y - 4.0),
                 egui::vec2(rect.width() * self.buffer_progress, 4.0),
             );
-            ui.painter()
-                .rect_filled(bar_rect, 0.0, egui::Color32::from_rgb(0, 120, 215));
+            ui.painter().rect_filled(bar_rect, 0.0, palette::BTN_ACTIVE);
         }
 
         rect

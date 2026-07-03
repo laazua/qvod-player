@@ -62,7 +62,6 @@ pub enum ContextMenuAction {
     PriorityHigh,
     PriorityNormal,
     PriorityLow,
-    SpeedLimit(u32),
 }
 
 use eframe::egui::{self, Context, Pos2, Rect, Ui};

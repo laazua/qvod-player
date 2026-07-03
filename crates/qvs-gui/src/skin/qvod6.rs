@@ -488,9 +488,6 @@ impl SkinEngine for Qvod6Skin {
                                 );
                             }
                             for action in actions {
-                                if matches!(action, ContextMenuAction::SpeedLimit(_)) {
-                                    continue;
-                                }
                                 let label = match action {
                                     ContextMenuAction::Play => "播放",
                                     ContextMenuAction::Pause => "暂停",
@@ -507,7 +504,6 @@ impl SkinEngine for Qvod6Skin {
                                     ContextMenuAction::PriorityHigh => "优先下载 - 高",
                                     ContextMenuAction::PriorityNormal => "优先下载 - 普通",
                                     ContextMenuAction::PriorityLow => "优先下载 - 低",
-                                    ContextMenuAction::SpeedLimit(_) => unreachable!(),
                                 };
                                 if ui.selectable_label(false, label).clicked() {
                                     result = Some(action.clone());

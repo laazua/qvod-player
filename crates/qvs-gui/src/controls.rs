@@ -18,7 +18,6 @@ pub struct PlayerControls {
     pub muted: bool,
     pub position_ms: u64,
     pub duration_ms: u64,
-    pub seek_position: Option<u64>,
     pub buffered_seconds: f64,
 }
 
@@ -34,7 +33,6 @@ impl PlayerControls {
             muted: false,
             position_ms: 0,
             duration_ms,
-            seek_position: None,
             buffered_seconds: 0.0,
         }
     }
@@ -76,22 +74,6 @@ impl PlayerControls {
 
     pub fn seek_to(&mut self, position_ms: u64) {
         self.position_ms = position_ms.min(self.duration_ms);
-        self.seek_position = None;
-    }
-
-    pub fn start_seek(&mut self) {
-        self.seek_position = Some(self.position_ms);
-    }
-
-    pub fn update_seek(&mut self, position_ms: u64) {
-        self.seek_position = Some(position_ms.min(self.duration_ms));
-    }
-
-    pub fn end_seek(&mut self) {
-        if let Some(pos) = self.seek_position {
-            self.position_ms = pos;
-            self.seek_position = None;
-        }
     }
 
     pub fn set_volume(&mut self, volume: f32) {
@@ -138,7 +120,6 @@ impl PlayerControls {
     pub fn reset(&mut self) {
         self.playing = false;
         self.position_ms = 0;
-        self.seek_position = None;
         self.buffered_seconds = 0.0;
     }
 }
