@@ -9,6 +9,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{Json, Response},
 };
+use sha1::Digest;
+use sha1::Sha1;
 use std::fmt::Write;
 
 use serde_json::{json, Value};
@@ -41,6 +43,7 @@ pub struct ControlParams {
     pub action: String,
     pub hash: Option<String>,
     pub value: Option<String>,
+    pub url: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -66,28 +69,33 @@ pub async fn handle_play(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     let hash = &params.hash;
-    let info_hash = parse_info_hash(hash).map_err(|e| {
-        tracing::warn!("invalid info_hash: {e}");
-        StatusCode::BAD_REQUEST
-    })?;
 
-    let uri = format!(
-        "qvod://{hash}|{}|{}|mp4|",
-        params.name.as_deref().unwrap_or("stream"),
-        params.size.unwrap_or(0)
-    );
-
+    let uri: String = if hash.starts_with("http://")
+        || hash.starts_with("https://")
+        || hash.starts_with("file://")
     {
+        hash.clone()
+    } else {
+        let _ = parse_info_hash(hash).map_err(|e| {
+            tracing::warn!("invalid info_hash: {e}");
+            StatusCode::BAD_REQUEST
+        })?;
+        format!(
+            "qvod://{hash}|{}|{}|mp4|",
+            params.name.as_deref().unwrap_or("stream"),
+            params.size.unwrap_or(0)
+        )
+    };
+
+    let (info_hash, file_size) = {
         let mut engine = state.engine.lock().await;
-        engine.play(&uri).await.map_err(|e| {
+        let stream = engine.play(&uri).await.map_err(|e| {
             tracing::error!("play failed: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    }
-
-    let file_size = {
-        let engine = state.engine.lock().await;
-        engine.file_size(&info_hash).unwrap_or(0)
+        let ih = stream.metadata.info_hash;
+        let fs = engine.file_size(&ih).unwrap_or(0);
+        (ih, fs)
     };
 
     let range_info = headers
@@ -226,11 +234,25 @@ pub async fn handle_status(
             "uptime_secs": state.start_time.elapsed().as_secs(),
         }))
     } else {
-        let Ok(info_hash) = parse_info_hash(&params.hash) else {
-            return Json(json!({
-                "state": "invalid_hash",
-                "error": "info_hash must be 40 hex characters"
-            }));
+        let hash_str = &params.hash;
+        let info_hash = if hash_str.starts_with("file://")
+            || hash_str.starts_with("http://")
+            || hash_str.starts_with("https://")
+        {
+            let mut hasher = Sha1::new();
+            hasher.update(hash_str.as_bytes());
+            let hash_bytes: [u8; 20] = hasher.finalize().into();
+            InfoHash(hash_bytes)
+        } else {
+            match parse_info_hash(hash_str) {
+                Ok(ih) => ih,
+                Err(_) => {
+                    return Json(json!({
+                        "state": "invalid_hash",
+                        "error": "info_hash must be 40 hex characters or a URI"
+                    }));
+                }
+            }
         };
         match engine.status(&info_hash).await {
             Some(s) => Json(json!({
@@ -254,24 +276,33 @@ pub async fn handle_control(
 ) -> Json<ControlResponse> {
     match params.action.as_str() {
         "play" => {
-            if let Some(hash) = &params.hash {
-                let uri = format!("qvod://{hash}||0|mp4|");
-                let mut engine = state.engine.lock().await;
-                match engine.play(&uri).await {
-                    Ok(_stream) => Json(ControlResponse {
-                        success: true,
-                        message: format!("playing {hash}"),
-                    }),
-                    Err(e) => Json(ControlResponse {
-                        success: false,
-                        message: format!("play failed: {e}"),
-                    }),
+            let uri = if let Some(url) = &params.url {
+                url.clone()
+            } else if let Some(hash) = &params.hash {
+                if hash.starts_with("http://")
+                    || hash.starts_with("https://")
+                    || hash.starts_with("file://")
+                {
+                    hash.clone()
+                } else {
+                    format!("qvod://{hash}||0|mp4|")
                 }
             } else {
-                Json(ControlResponse {
+                return Json(ControlResponse {
                     success: false,
-                    message: "hash required".into(),
-                })
+                    message: "hash or url required".into(),
+                });
+            };
+            let mut engine = state.engine.lock().await;
+            match engine.play(&uri).await {
+                Ok(_stream) => Json(ControlResponse {
+                    success: true,
+                    message: format!("playing {uri}"),
+                }),
+                Err(e) => Json(ControlResponse {
+                    success: false,
+                    message: format!("play failed: {e}"),
+                }),
             }
         }
         "pause" => {
@@ -292,20 +323,31 @@ pub async fn handle_control(
         }
         "stop" => {
             if let Some(hash) = &params.hash {
-                match parse_info_hash(hash) {
-                    Ok(ih) => {
-                        let mut engine = state.engine.lock().await;
-                        engine.stop(&ih);
-                        Json(ControlResponse {
-                            success: true,
-                            message: "stopped".into(),
-                        })
+                let info_hash = if hash.starts_with("file://")
+                    || hash.starts_with("http://")
+                    || hash.starts_with("https://")
+                {
+                    let mut hasher = Sha1::new();
+                    hasher.update(hash.as_bytes());
+                    let hash_bytes: [u8; 20] = hasher.finalize().into();
+                    InfoHash(hash_bytes)
+                } else {
+                    match parse_info_hash(hash) {
+                        Ok(ih) => ih,
+                        Err(e) => {
+                            return Json(ControlResponse {
+                                success: false,
+                                message: format!("invalid hash: {e}"),
+                            });
+                        }
                     }
-                    Err(e) => Json(ControlResponse {
-                        success: false,
-                        message: format!("invalid hash: {e}"),
-                    }),
-                }
+                };
+                let mut engine = state.engine.lock().await;
+                engine.stop(&info_hash);
+                Json(ControlResponse {
+                    success: true,
+                    message: "stopped".into(),
+                })
             } else {
                 Json(ControlResponse {
                     success: false,
@@ -386,6 +428,7 @@ mod tests {
             action: "pause".into(),
             hash: None,
             value: None,
+            url: None,
         };
         let result = handle_control(State(state), Json(params)).await;
         assert!(result.success);
@@ -404,6 +447,7 @@ mod tests {
             action: "nonexistent".into(),
             hash: None,
             value: None,
+            url: None,
         };
         let result = handle_control(State(state), Json(params)).await;
         assert!(!result.success);
@@ -422,6 +466,7 @@ mod tests {
             action: "status".into(),
             hash: None,
             value: None,
+            url: None,
         };
         let result = handle_control(State(state), Json(params)).await;
         assert!(result.success);
@@ -440,6 +485,7 @@ mod tests {
             action: "seek".into(),
             hash: None,
             value: None,
+            url: None,
         };
         let result = handle_control(State(state), Json(params)).await;
         assert!(!result.success);
@@ -458,6 +504,7 @@ mod tests {
             action: "stop".into(),
             hash: None,
             value: None,
+            url: None,
         };
         let result = handle_control(State(state), Json(params)).await;
         assert!(!result.success);

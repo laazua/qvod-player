@@ -11,6 +11,7 @@ workspace = true
 qvs-core = { path = "../qvs-core" }
 qvs-stream = { path = "../qvs-stream" }
 qvs-media = { path = "../qvs-media" }
+qvs-local-server = { path = "../qvs-local-server" }
 clap.workspace = true
 serde.workspace = true
 serde_json = "1"
@@ -23,6 +24,7 @@ toml.workspace = true
 dirs.workspace = true
 reqwest.workspace = true
 image.workspace = true
+rfd.workspace = true
 
 [build-dependencies]
 embed-resource = "1"

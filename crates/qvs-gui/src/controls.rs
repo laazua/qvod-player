@@ -12,6 +12,7 @@ pub enum PlaybackAction {
 }
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PlayerControls {
     pub playing: bool,
     pub volume: f32,
@@ -20,6 +21,7 @@ pub struct PlayerControls {
     pub duration_ms: u64,
     pub buffered_seconds: f64,
     pub fullscreen: bool,
+    pub stop_pressed: bool,
 }
 
 use crate::skin::SkinEngine;
@@ -36,6 +38,7 @@ impl PlayerControls {
             duration_ms,
             buffered_seconds: 0.0,
             fullscreen: false,
+            stop_pressed: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl PlayerControls {
                 self.toggle_play();
             }
             if skin.draw_stop_button(ui) {
+                self.stop_pressed = true;
                 self.reset();
             }
 
@@ -125,6 +129,7 @@ impl PlayerControls {
         self.playing = false;
         self.position_ms = 0;
         self.buffered_seconds = 0.0;
+        self.stop_pressed = false;
     }
 }
 

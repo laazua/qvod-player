@@ -1,12 +1,18 @@
+use std::sync::mpsc;
+
 use eframe::egui;
 use eframe::Frame;
 
-use crate::client::ServerClient;
+use qvs_local_server::{LocalServer, LocalServerConfig};
+use qvs_media::subprocess::FfmpegFrameReader;
+use qvs_stream::{EngineConfig, QvodEngine};
+
+use crate::client::{ServerClient, StreamStatusResponse};
 use crate::player::PlayerPanel;
 use crate::playlist::PlaylistManager;
 use crate::settings::AppSettings;
 use crate::skin::{palette, Qvod6Skin, SkinEngine, TaskEntry, TaskStatus, TitleBarAction};
-use crate::status::StatusPanel;
+use crate::status::{NetworkStatus, StatusPanel};
 use crate::theme::QvodTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,17 +42,44 @@ pub struct QvodApp {
     pub server_client: Option<ServerClient>,
     page: AppPage,
     player_state: PlayerState,
+
+    // Server-client mode state
+    current_hash: Option<String>,
+    pending_play_hash: Option<String>,
+    pending_play_url: Option<String>,
+    status_rx: mpsc::Receiver<Option<StreamStatusResponse>>,
+    status_tx: mpsc::Sender<Option<StreamStatusResponse>>,
+
+    // Dialog state
+    show_url_dialog: bool,
+    url_input: String,
+
+    // Embedded local server (standalone mode)
+    _local_server: Option<LocalServer>,
+
+    // Video decoder using ffmpeg subprocess
+    frame_reader: Option<FfmpegFrameReader>,
+    current_file_path: Option<String>,
+    video_texture: Option<egui::TextureHandle>,
 }
 
 impl QvodApp {
     #[must_use]
     pub fn new(startup_uri: Option<String>, cli_server_url: Option<String>) -> Self {
         let settings = AppSettings::load().with_cli_server_url(cli_server_url);
-        let server_client = settings
-            .server_url
-            .as_ref()
-            .map(|url| ServerClient::new(url.clone()));
         let player = PlayerPanel::new();
+        let (tx, rx) = mpsc::channel();
+
+        // Auto-start a local server when no remote server URL is configured
+        let (server_client, local_server) = if let Some(url) = &settings.server_url {
+            (Some(ServerClient::new(url.clone())), None)
+        } else {
+            // Spawn a local engine + server in the background
+            let rt = tokio::runtime::Handle::try_current().expect("tokio runtime must be running");
+            let (client, server) = rt.block_on(async { start_local_server(&settings).await });
+            (client, Some(server))
+        };
+
         let mut app = Self {
             settings,
             player,
@@ -57,6 +90,17 @@ impl QvodApp {
             server_client,
             page: AppPage::Player,
             player_state: PlayerState::Stopped,
+            current_hash: None,
+            pending_play_hash: None,
+            pending_play_url: None,
+            status_rx: rx,
+            status_tx: tx,
+            show_url_dialog: false,
+            url_input: String::new(),
+            _local_server: local_server,
+            frame_reader: None,
+            current_file_path: None,
+            video_texture: None,
         };
 
         if let Some(uri) = startup_uri {
@@ -76,14 +120,91 @@ impl QvodApp {
         self.page
     }
 
+    /// Extract the info_hash from a qvod:// URI, or return the URL itself for http(s)://.
+    fn extract_hash(uri: &str) -> Option<String> {
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            return Some(uri.to_string());
+        }
+        uri.strip_prefix("qvod://")
+            .and_then(|s| s.split('|').next())
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+    }
+
     pub fn play_uri(&mut self, uri: &str, title: &str) {
+        let is_file = is_local_file_path(uri);
+
+        let file_uri = if is_file {
+            // Convert local path to file:// URI
+            // Ensure absolute path with forward slashes
+            let normalized = if cfg!(windows) {
+                uri.replace('\\', "/")
+            } else {
+                uri.to_string()
+            };
+            format!("file://{normalized}")
+        } else {
+            uri.to_string()
+        };
+
+        // Close previous frame reader
+        self.frame_reader = None;
+        self.player.clear_video();
+        self.current_file_path = None;
+
+        // For local files, start the ffmpeg subprocess decoder
+        if is_file {
+            let raw_path = if cfg!(windows) {
+                uri.replace("file://", "").replace("\\\\", "\\")
+            } else {
+                uri.to_string()
+            };
+            match FfmpegFrameReader::open(&raw_path) {
+                Ok(reader) => {
+                    tracing::info!(
+                        "Started ffmpeg decoder for {} ({}x{}, {:.1}fps)",
+                        raw_path,
+                        reader.width(),
+                        reader.height(),
+                        reader.fps()
+                    );
+                    self.player
+                        .set_video_dimensions(reader.width(), reader.height());
+                    self.current_file_path = Some(raw_path);
+                    self.frame_reader = Some(reader);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Could not start ffmpeg decoder (playback via HTTP streaming): {e}"
+                    );
+                }
+            }
+        }
+
+        let hash = if is_file {
+            Some(file_uri.clone())
+        } else {
+            Self::extract_hash(uri)
+        };
+        self.current_hash = hash;
+
         self.playlist.add(TaskEntry {
-            uri: uri.into(),
+            uri: file_uri.clone(),
             title: title.into(),
             status: TaskStatus::Downloading,
             ..Default::default()
         });
         self.player_state = PlayerState::Buffering;
+
+        // In server mode, tell the remote server to start playing.
+        if self.server_client.is_some() {
+            self.player.controls.playing = true;
+            if is_file {
+                self.pending_play_url = Some(file_uri);
+            } else {
+                self.pending_play_hash = self.current_hash.clone();
+            }
+        }
     }
 
     pub fn on_keypress(&mut self, key: egui::Key) {
@@ -104,6 +225,8 @@ impl QvodApp {
             }
             egui::Key::Escape => {
                 self.player_state = PlayerState::Stopped;
+                self.player.controls.stop_pressed = true;
+                self.player.controls.reset();
             }
             _ => {}
         }
@@ -118,6 +241,33 @@ impl QvodApp {
 impl eframe::App for QvodApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.theme.apply(ctx);
+
+        // ── In server mode: send any pending play command ────────────
+        if let Some(hash) = self.pending_play_hash.take() {
+            if let Some(ref client) = self.server_client {
+                let client = client.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client.play(&hash).await {
+                        tracing::error!("server play failed: {e}");
+                    }
+                });
+            }
+        }
+        if let Some(url) = self.pending_play_url.take() {
+            if let Some(ref client) = self.server_client {
+                let client = client.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client.play_uri(&url).await {
+                        tracing::error!("server play_uri failed: {e}");
+                    }
+                });
+            }
+        }
+
+        // Capture controls state BEFORE any UI handlers run this frame,
+        // so we can detect user-initiated changes after controls.ui().
+        let pre_playing = self.player.controls.playing;
+        let pre_position = self.player.controls.position_ms;
 
         // ── Frameless window resize (drag edges/corners) ───────────
         // Since the window uses custom decorations (no native frame),
@@ -246,8 +396,30 @@ impl eframe::App for QvodApp {
                     ui.menu_button("文件", |ui| {
                         if ui.button("打开文件...").clicked() {
                             ui.close_menu();
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter(
+                                    "媒体文件",
+                                    &[
+                                        "mp4", "avi", "mkv", "rmvb", "wmv", "flv", "mov", "ts",
+                                        "webm", "m4v", "3gp",
+                                    ],
+                                )
+                                .add_filter("QVOD 种子", &["qvs"])
+                                .add_filter("所有文件", &["*"])
+                                .pick_file()
+                            {
+                                let path_str = path.to_string_lossy().to_string();
+                                let name = path
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or(&path_str)
+                                    .to_string();
+                                self.play_uri(&path_str, &name);
+                            }
                         }
                         if ui.button("打开 URL...").clicked() {
+                            self.show_url_dialog = true;
+                            self.url_input.clear();
                             ui.close_menu();
                         }
                         ui.separator();
@@ -318,6 +490,47 @@ impl eframe::App for QvodApp {
                 });
             });
 
+        // ── URL input dialog ──────────────────────────────────────────
+        if self.show_url_dialog {
+            let mut submitted = false;
+            let mut closed = false;
+            egui::Window::new("打开 URL")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .fixed_size([480.0, 140.0])
+                .show(ctx, |ui| {
+                    ui.label("请输入 qvod:// 或 http(s):// 链接：");
+                    let resp = ui.add_sized(
+                        [460.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.url_input).hint_text(
+                            "qvod://<hash>|<name>|<size>|<fmt>| 或 https://example.com/video.mp4",
+                        ),
+                    );
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() || enter {
+                            submitted = true;
+                        }
+                        if ui.button("取消").clicked() {
+                            closed = true;
+                        }
+                    });
+                    resp.request_focus();
+                });
+            if submitted {
+                let trimmed = self.url_input.trim().to_string();
+                if !trimmed.is_empty() {
+                    let name = trimmed.split('|').nth(1).unwrap_or(&trimmed).to_string();
+                    self.play_uri(&trimmed, &name);
+                }
+                self.show_url_dialog = false;
+            }
+            if closed {
+                self.show_url_dialog = false;
+            }
+        }
+
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.page, AppPage::Player, "▶ Player");
@@ -359,11 +572,175 @@ impl eframe::App for QvodApp {
                 self.player.controls.ui(ui, &*self.skin);
             });
 
+        // ── Sync controls state to remote server ─────────────────────
+        if let Some(ref client) = self.server_client {
+            let hash = self.current_hash.clone().unwrap_or_default();
+            if !hash.is_empty() {
+                // Stop (highest priority — resets everything)
+                if self.player.controls.stop_pressed {
+                    self.player.controls.stop_pressed = false;
+                    let client = client.clone();
+                    let h = hash.clone();
+                    tokio::spawn(async move {
+                        let _ = client.stop(&h).await;
+                    });
+                } else {
+                    // Play / Pause toggle
+                    if pre_playing && !self.player.controls.playing {
+                        let client = client.clone();
+                        tokio::spawn(async move {
+                            let _ = client.pause().await;
+                        });
+                    } else if !pre_playing && self.player.controls.playing {
+                        let client = client.clone();
+                        tokio::spawn(async move {
+                            let _ = client.resume().await;
+                        });
+                    }
+
+                    // Seek (position changed by user via progress bar or arrow keys)
+                    if self.player.controls.position_ms != pre_position {
+                        let client = client.clone();
+                        let pos = self.player.controls.position_ms;
+                        tokio::spawn(async move {
+                            let _ = client.seek(&hash, pos).await;
+                        });
+                    }
+                }
+            }
+        }
+
+        // ── Process status responses from server ─────────────────────
+        while let Ok(status) = self.status_rx.try_recv() {
+            match status {
+                Some(s) => {
+                    self.player.controls.position_ms = s.position_ms;
+                    self.player.controls.duration_ms = s.duration_ms;
+                    self.player.controls.buffered_seconds = s.buffered_seconds;
+
+                    // Drive state transitions from server stream state
+                    match s.state.as_str() {
+                        "Playing" => {
+                            if self.player_state == PlayerState::Buffering {
+                                self.player_state = PlayerState::Playing;
+                                self.player.controls.playing = true;
+                            }
+                        }
+                        "Ended" => {
+                            if self.player_state != PlayerState::Stopped {
+                                self.player_state = PlayerState::Ended;
+                                self.player.controls.playing = false;
+                            }
+                        }
+                        "Paused" => {
+                            if self.player_state == PlayerState::Playing {
+                                self.player_state = PlayerState::Paused;
+                                self.player.controls.playing = false;
+                            }
+                        }
+                        "Error" => {
+                            if self.player_state != PlayerState::Stopped {
+                                self.player_state = PlayerState::Error("Stream error".into());
+                                self.player.controls.playing = false;
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    self.status.update(NetworkStatus {
+                        buffer_progress: if s.duration_ms > 0 {
+                            (s.buffered_seconds / (s.duration_ms as f64 / 1000.0)).min(1.0)
+                        } else {
+                            s.download_progress
+                        },
+                        download_progress: s.download_progress,
+                        connected_peers: s.peer_count,
+                        server_url: self.settings.server_url.clone(),
+                        server_connected: true,
+                        ..Default::default()
+                    });
+                }
+                None => {
+                    self.status.update(NetworkStatus {
+                        server_url: self.settings.server_url.clone(),
+                        server_connected: false,
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // ── Periodically poll server status ──────────────────────────
+        if let Some(ref client) = self.server_client {
+            if let Some(ref hash) = self.current_hash {
+                if self.status.needs_update() {
+                    let client = client.clone();
+                    let h = hash.clone();
+                    let tx = self.status_tx.clone();
+                    tokio::spawn(async move {
+                        let result = client.get_status(&h).await.ok();
+                        let _ = tx.send(result);
+                    });
+                }
+            }
+        }
+
         if self.player.controls.playing && self.player_state == PlayerState::Paused {
             self.player_state = PlayerState::Playing;
         }
         if !self.player.controls.playing && self.player_state == PlayerState::Playing {
             self.player_state = PlayerState::Paused;
+        }
+
+        // ── Video frame rendering via ffmpeg subprocess ──────────
+        if let Some(ref mut reader) = self.frame_reader {
+            match self.player_state {
+                PlayerState::Playing => {
+                    match reader.try_read_frame() {
+                        Ok(Some(frame_data)) => {
+                            let w = reader.width() as usize;
+                            let h = reader.height() as usize;
+                            if w > 0 && h > 0 && frame_data.len() >= w * h * 3 {
+                                let color_image =
+                                    egui::ColorImage::from_rgb([w, h], &frame_data[..w * h * 3]);
+                                let new_texture = ctx.load_texture(
+                                    "video_frame",
+                                    color_image,
+                                    egui::TextureOptions::default(),
+                                );
+                                self.player.set_video_texture(new_texture.id());
+                                self.video_texture = Some(new_texture);
+                            }
+                        }
+                        Ok(None) => {
+                            // No frame available yet — keep current display
+                        }
+                        Err(_) => {
+                            // Decoder ended or error
+                            self.frame_reader = None;
+                            self.video_texture = None;
+                            self.player.clear_video();
+                            if self.player_state == PlayerState::Playing {
+                                self.player_state = PlayerState::Ended;
+                                self.player.controls.playing = false;
+                            }
+                        }
+                    }
+                }
+                PlayerState::Paused | PlayerState::Buffering => {
+                    // Keep current frame displayed
+                }
+                PlayerState::Stopped | PlayerState::Ended | PlayerState::Error(_) => {
+                    self.frame_reader = None;
+                    self.video_texture = None;
+                    self.player.clear_video();
+                }
+            }
+        }
+
+        // Periodically request repaint while playing to update video frames
+        if self.player_state == PlayerState::Playing && self.frame_reader.is_some() {
+            ctx.request_repaint();
         }
 
         if self.page == AppPage::Player {
@@ -373,6 +750,63 @@ impl eframe::App for QvodApp {
                 .draw(ctx, &self.player_state, &*self.skin, video_area, time);
         }
     }
+}
+
+/// Start an embedded QVOD engine + local HTTP server on localhost.
+/// Returns a (ServerClient, LocalServer) tuple.
+async fn start_local_server(settings: &AppSettings) -> (Option<ServerClient>, LocalServer) {
+    let engine_config = EngineConfig {
+        cache_dir: settings.cache_dir.clone(),
+        tracker_enabled: false,
+        dht_enabled: false,
+        cache_enabled: false,
+        ..Default::default()
+    };
+
+    let engine = QvodEngine::new(engine_config).await;
+    let server_config = LocalServerConfig::new(settings.local_server_port)
+        .with_bind_address(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+
+    match LocalServer::new(&server_config, engine).await {
+        Ok(server) => {
+            let port: u16 = server.port();
+            let client = ServerClient::new(format!("http://127.0.0.1:{port}"));
+            tracing::info!("Embedded local server started on port {port}");
+            (Some(client), server)
+        }
+        Err(e) => {
+            tracing::error!("Failed to start embedded local server: {e}");
+            // Use a different port for the fallback attempt
+            let fallback_config = LocalServerConfig::new(0)
+                .with_bind_address(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+            let fallback_engine = QvodEngine::new(EngineConfig::default()).await;
+            let fallback_server = LocalServer::new(&fallback_config, fallback_engine)
+                .await
+                .unwrap_or_else(|e| panic!("fallback server also failed: {e}"));
+            (None, fallback_server)
+        }
+    }
+}
+
+/// Check if a string looks like a local file path (not a URI scheme).
+fn is_local_file_path(s: &str) -> bool {
+    if s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("qvod://")
+        || s.starts_with("qvod:")
+        || s.starts_with("file://")
+    {
+        return false;
+    }
+    // Absolute paths
+    s.starts_with('/')
+        || s.starts_with("\\\\")
+        || s.as_bytes().first().is_some_and(|b| {
+            b.is_ascii_alphabetic()
+                && s.len() > 2
+                && s.as_bytes()[1] == b':'
+                && (s.as_bytes().get(2) == Some(&b'\\') || s.as_bytes().get(2) == Some(&b'/'))
+        })
 }
 
 #[cfg(test)]

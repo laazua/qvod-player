@@ -29,7 +29,7 @@ impl Default for EngineConfig {
             tracker_urls: vec!["http://tracker.qvod.com:8621/announce".into()],
             dht_seed_nodes: vec!["router.bittorrent.com:6881".into()],
             http_fallback: true,
-            dht_enabled: true,
+            dht_enabled: false,
             tracker_enabled: true,
             cache_enabled: true,
             max_peers_per_stream: 50,

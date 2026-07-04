@@ -37,6 +37,13 @@ enum Commands {
 fn main() -> Result<(), eframe::Error> {
     tracing_subscriber::fmt::init();
 
+    // Create a tokio runtime for background HTTP requests (ServerClient).
+    // .enter() makes tokio::spawn available from update() callbacks.
+    let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
+        panic!("Failed to create tokio runtime: {e}");
+    });
+    let _guard = rt.enter();
+
     let cli = Cli::parse();
 
     // Check env var if --server-url wasn't provided on CLI

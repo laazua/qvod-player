@@ -14,9 +14,11 @@ qvs-tracker = { path = "../qvs-tracker" }
 qvs-dht = { path = "../qvs-dht" }
 qvs-transport = { path = "../qvs-transport" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 sha1.workspace = true
 rand.workspace = true
 futures.workspace = true
+reqwest.workspace = true
