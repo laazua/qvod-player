@@ -19,6 +19,10 @@ struct Cli {
     /// Use 0.0.0.0 to accept remote connections (e.g. from GUI clients).
     #[arg(short = 'a', long, default_value = "127.0.0.1")]
     bind: IpAddr,
+
+    /// Enable the experimental custom DHT network.
+    #[arg(long)]
+    dht: bool,
 }
 
 #[tokio::main]
@@ -33,6 +37,9 @@ async fn main() {
         EngineConfig::load(&cli.config).unwrap_or_default()
     };
     engine_config.listen_port = cli.port;
+    if cli.dht {
+        engine_config.dht_enabled = true;
+    }
 
     let engine = QvodEngine::new(engine_config).await;
     let server_config = LocalServerConfig::new(cli.port).with_bind_address(cli.bind);

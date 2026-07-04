@@ -10,7 +10,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Play a qvod:// URI
+    /// Play a qvod:// or http(s):// URI
     Play { uri: String },
     /// Show engine status
     Status,

@@ -19,4 +19,5 @@ tokio.workspace = true
 tokio-stream = "0.1"
 futures.workspace = true
 hex.workspace = true
+sha1.workspace = true
 tracing.workspace = true

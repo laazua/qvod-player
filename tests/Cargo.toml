@@ -1,0 +1,24 @@
+[package]
+name = "qvs-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+qvs-core = { path = "../crates/qvs-core" }
+qvs-format = { path = "../crates/qvs-format" }
+qvs-dht = { path = "../crates/qvs-dht" }
+qvs-tracker = { path = "../crates/qvs-tracker" }
+qvs-transport = { path = "../crates/qvs-transport" }
+qvs-stream = { path = "../crates/qvs-stream" }
+qvs-local-server = { path = "../crates/qvs-local-server" }
+
+tokio.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+sha1.workspace = true
+rand.workspace = true
+hex.workspace = true
+futures.workspace = true
+bytes.workspace = true
