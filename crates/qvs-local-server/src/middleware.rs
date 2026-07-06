@@ -51,10 +51,16 @@ pub async fn request_logger(req: Request, next: Next) -> Response {
     let start = Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
+    let ua = req
+        .headers()
+        .get("User-Agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_owned();
     let response = next.run(req).await;
     let status = response.status();
     let elapsed = start.elapsed();
-    tracing::info!("{method} {uri} -> {status} ({elapsed:?})");
+    tracing::info!("{method} {uri} -> {status} ({elapsed:?}) [{ua}]");
     response
 }
 
@@ -95,6 +101,7 @@ pub async fn rate_limit_middleware(
         .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
 
     if !limiter.check(ip).await {
+        tracing::warn!("rate_limit: too many requests from {ip}");
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
     Ok(next.run(req).await)

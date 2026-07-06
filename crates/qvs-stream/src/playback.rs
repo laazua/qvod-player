@@ -48,6 +48,7 @@ pub struct MediaStream {
 impl MediaStream {
     #[must_use]
     pub fn new(stats: StreamStats) -> Self {
+        tracing::debug!("MediaStream::new: duration={}ms", stats.duration_ms);
         Self {
             stats,
             paused: true,
@@ -56,22 +57,29 @@ impl MediaStream {
     }
 
     pub fn play(&mut self) -> Result<(), QvodError> {
+        tracing::info!("MediaStream::play: state {:?} -> Playing", self.stats.state);
         self.paused = false;
         self.stats.state = StreamState::Playing;
         Ok(())
     }
 
     pub fn pause(&mut self) {
+        tracing::info!("MediaStream::pause: state {:?} -> Paused", self.stats.state);
         self.paused = true;
         self.stats.state = StreamState::Paused;
     }
 
     pub fn resume(&mut self) {
+        tracing::info!(
+            "MediaStream::resume: state {:?} -> Playing",
+            self.stats.state
+        );
         self.paused = false;
         self.stats.state = StreamState::Playing;
     }
 
     pub fn seek(&mut self, timestamp_ms: u64) {
+        tracing::info!("MediaStream::seek: -> {}ms", timestamp_ms);
         self.seek_target = Some(timestamp_ms);
         self.stats.state = StreamState::Seeking;
         self.stats.position_ms = timestamp_ms;
@@ -97,18 +105,30 @@ impl MediaStream {
     }
 
     pub fn end(&mut self) {
+        tracing::info!("MediaStream::end: state {:?} -> Ended", self.stats.state);
         self.stats.state = StreamState::Ended;
     }
 
     pub fn update_position(&mut self, position_ms: u64) {
-        self.stats.position_ms = position_ms;
         if self.stats.state == StreamState::Seeking {
+            tracing::info!(
+                "MediaStream::update_position: seek complete at {}ms",
+                position_ms
+            );
             self.stats.state = StreamState::Playing;
             self.seek_target = None;
         }
+        self.stats.position_ms = position_ms;
     }
 
     pub fn update_speed(&mut self, speed_bps: f64) {
+        if (self.stats.speed_bps - speed_bps).abs() > self.stats.speed_bps * 0.5 {
+            tracing::debug!(
+                "MediaStream::update_speed: {:.0} -> {:.0} B/s",
+                self.stats.speed_bps,
+                speed_bps
+            );
+        }
         self.stats.speed_bps = speed_bps;
     }
 
@@ -121,6 +141,14 @@ impl MediaStream {
     }
 
     pub fn update_progress(&mut self, progress: f64, bytes: u64) {
+        if (self.stats.download_progress - progress).abs() > 0.05 {
+            tracing::debug!(
+                "MediaStream::update_progress: {:.1}% -> {:.1}%, {} bytes",
+                self.stats.download_progress * 100.0,
+                progress * 100.0,
+                bytes
+            );
+        }
         self.stats.download_progress = progress;
         self.stats.bytes_downloaded = bytes;
     }

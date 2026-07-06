@@ -26,12 +26,17 @@ WIN_DIR    := target/x86_64-pc-windows-gnu/release
 MAC_DIR    := target/x86_64-apple-darwin/release
 DIST_DIR   := dist
 
+# ── FFmpeg MinGW paths (Windows cross-compile) ─────────
+FFMPEG_MINGW_DIR := ffmpeg-mingw
+FFMPEG_MINGW_INSTALL := $(FFMPEG_MINGW_DIR)/install
+FFMPEG_MINGW_SOURCE  := $(FFMPEG_MINGW_DIR)/source
+
 # ── Find the host OS ──────────────────────────────────────
 UNAME_S    := $(shell uname -s 2>/dev/null || echo "Unknown")
 UNAME_M    := $(shell uname -m 2>/dev/null || echo "Unknown")
 
 .PHONY: all server gui-linux gui-windows gui-macos package-all \
-        check-env list-targets install-mingw clean distclean help
+        check-env list-targets install-mingw build-ffmpeg-mingw clean distclean help
 
 all: check-env
 	@echo "=== QVOD Build System v$(VERSION) ($(GIT_HASH)) ==="
@@ -44,9 +49,15 @@ all: check-env
 	@echo "  make gui-macos           GUI player (macOS, needs osxcross)"
 	@echo "  make package-all SERVER_URL=http://...   All packages"
 	@echo ""
+	@echo "Windows GUI dependencies (install-mingw):"
+	@echo "  DNF:   mingw64-gcc mingw64-winpthreads-static nasm"
+	@echo "  APT:   mingw-w64 nasm"
+	@echo "  PACMAN: mingw-w64-gcc nasm"
+	@echo "  Also:  yasm (for FFmpeg assembly), rustup target add x86_64-pc-windows-gnu"
+	@echo ""
 	@echo "Server URL can be baked into GUI:"
 	@echo "  make gui-linux SERVER_URL=http://192.168.1.100:8621"
-	@echo ""
+	@echo "  make gui-windows SERVER_URL=http://192.168.1.100:8621"
 
 check-env:
 	@which rustc >/dev/null 2>&1 || { echo "rustc not found. Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"; exit 1; }
@@ -107,13 +118,70 @@ gui-linux: check-env
 	@ls -lh $(DIST_DIR)/packages/$(PKG_NAME)-$(SUFFIX)-$(VERSION).tar.gz
 
 # ============================================================
+# FFmpeg MinGW (static libs for Windows cross-compile)
+# ============================================================
+build-ffmpeg-mingw:
+	@if [ -f "$(FFMPEG_MINGW_INSTALL)/lib/libavcodec.a" ]; then \
+		echo "==> FFmpeg MinGW libs already built"; \
+	else \
+		if [ ! -f "$(FFMPEG_MINGW_SOURCE)/configure" ]; then \
+			echo "==> Looking for cached FFmpeg source..."; \
+			CACHED=$$(ls -d target/debug/build/ffmpeg-sys-*/out/ffmpeg-*/configure 2>/dev/null | head -1); \
+			if [ -n "$$CACHED" ]; then \
+				CACHED_DIR=$$(dirname "$$CACHED"); \
+				echo "==> Copying cached FFmpeg source from $$CACHED_DIR"; \
+				mkdir -p "$(FFMPEG_MINGW_SOURCE)"; \
+				cp -a "$$CACHED_DIR/." "$(FFMPEG_MINGW_SOURCE)/"; \
+			else \
+				FFMPEG_VERSION="8.1.2"; \
+				FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-$${FFMPEG_VERSION}.tar.xz"; \
+				echo "==> Downloading FFmpeg $${FFMPEG_VERSION} from ffmpeg.org..."; \
+				mkdir -p "$(FFMPEG_MINGW_DIR)"; \
+				if command -v curl >/dev/null 2>&1; then \
+					curl -fsSL "$${FFMPEG_URL}" -o "$(FFMPEG_MINGW_DIR)/ffmpeg.tar.xz"; \
+				elif command -v wget >/dev/null 2>&1; then \
+					wget -q "$${FFMPEG_URL}" -O "$(FFMPEG_MINGW_DIR)/ffmpeg.tar.xz"; \
+				else \
+					echo "ERROR: neither curl nor wget found"; \
+					echo "Install curl/wget or manually download:"; \
+					echo "  wget $${FFMPEG_URL}"; \
+					echo "  tar xf ffmpeg-$${FFMPEG_VERSION}.tar.xz --strip 1 -C $(FFMPEG_MINGW_SOURCE)"; \
+					exit 1; \
+				fi; \
+				echo "==> Extracting FFmpeg source..."; \
+				mkdir -p "$(FFMPEG_MINGW_SOURCE)"; \
+				tar xf "$(FFMPEG_MINGW_DIR)/ffmpeg.tar.xz" --strip 1 -C "$(FFMPEG_MINGW_SOURCE)" && \
+				rm "$(FFMPEG_MINGW_DIR)/ffmpeg.tar.xz"; \
+			fi; \
+		fi; \
+		echo "==> Configuring FFmpeg for MinGW"; \
+		cd "$(FFMPEG_MINGW_SOURCE)" && make clean 2>/dev/null || true; \
+		cd "$(FFMPEG_MINGW_SOURCE)" && ./configure \
+		  --prefix="$(abspath $(FFMPEG_MINGW_INSTALL))" \
+		  --cross-prefix=x86_64-w64-mingw32- \
+		  --target-os=mingw32 --arch=x86_64 --enable-cross-compile \
+		  --extra-cflags='-w -pthread' --extra-libs='-lwinpthread' \
+		  --disable-stripping --enable-static --disable-shared --enable-pic \
+		  --disable-autodetect --disable-programs --disable-doc \
+		  --disable-gpl --disable-version3 --disable-nonfree \
+		  --enable-avcodec --enable-avdevice --enable-avfilter \
+		  --enable-avformat --enable-swresample --enable-swscale \
+		  --disable-indev=dshow && \
+		echo "==> Building FFmpeg (this may take a while)" && \
+		$(MAKE) -C "$(FFMPEG_MINGW_SOURCE)" -j$$(nproc) install; \
+	fi
+
+# ============================================================
 # GUI — Windows (cross-compile)
 # ============================================================
-gui-windows: check-env
+gui-windows: check-env build-ffmpeg-mingw
 	@rustup target list --installed | grep -q x86_64-pc-windows-gnu || rustup target add x86_64-pc-windows-gnu
 	@which x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { echo "MinGW required: sudo apt install mingw-w64"; exit 1; }
 	@echo "==> Building Windows GUI"$(if $(SERVER_URL)," with server URL: $(SERVER_URL)")
-	QVS_SERVER_URL="$(SERVER_URL)" cargo build --release --target x86_64-pc-windows-gnu -p qvs-gui 2>&1 | tail -3
+	QVS_SERVER_URL="$(SERVER_URL)" \
+	FFMPEG_DIR="$(abspath $(FFMPEG_MINGW_INSTALL))" \
+	CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+		cargo build --release --target x86_64-pc-windows-gnu -p qvs-gui 2>&1 | tail -3
 	@echo "==> Packaging"
 	@mkdir -p $(DIST_DIR)/packages
 	$(eval SUFFIX := $(if $(SERVER_URL),gui-windows-x86_64-server,gui-windows-x86_64))
@@ -176,9 +244,9 @@ check: test clippy fmt
 	@echo "All checks passed"
 
 install-mingw:
-	@if command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y mingw-w64; \
-	elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y mingw64-gcc; \
-	elif command -v pacman >/dev/null 2>&1; then sudo pacman -S --noconfirm mingw-w64-gcc; \
+	@if command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y mingw-w64 nasm yasm; \
+	elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y mingw64-gcc mingw64-winpthreads-static nasm yasm; \
+	elif command -v pacman >/dev/null 2>&1; then sudo pacman -S --noconfirm mingw-w64-gcc nasm yasm; \
 	else echo "Unsupported package manager"; exit 1; fi
 	rustup target add x86_64-pc-windows-gnu
 
@@ -202,7 +270,14 @@ help:
 	@echo "    make gui-linux               Linux GUI"
 	@echo "    make gui-windows             Windows GUI (needs MinGW)"
 	@echo "    make gui-macos               macOS GUI (needs osxcross)"
+	@echo "    make install-mingw           Install MinGW cross-compiler + deps"
 	@echo "    make package-all             All packages"
+	@echo ""
+	@echo "  Windows GUI dependencies (install-mingw):"
+	@echo "    DNF:   mingw64-gcc mingw64-winpthreads-static nasm yasm"
+	@echo "    APT:   mingw-w64 nasm yasm"
+	@echo "    PACMAN: mingw-w64-gcc nasm yasm"
+	@echo "    Also:  rustup target add x86_64-pc-windows-gnu"
 	@echo ""
 	@echo "  With server URL (baked in):"
 	@echo "    make gui-linux   SERVER_URL=http://192.168.1.100:8621"

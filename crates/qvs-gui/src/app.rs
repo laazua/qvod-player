@@ -4,7 +4,7 @@ use eframe::egui;
 use eframe::Frame;
 
 use qvs_local_server::{LocalServer, LocalServerConfig};
-use qvs_media::subprocess::FfmpegFrameReader;
+use qvs_media::FrameReader;
 use qvs_stream::{EngineConfig, QvodEngine};
 
 use crate::client::{ServerClient, StreamStatusResponse};
@@ -50,6 +50,10 @@ pub struct QvodApp {
     status_rx: mpsc::Receiver<Option<StreamStatusResponse>>,
     status_tx: mpsc::Sender<Option<StreamStatusResponse>>,
 
+    // Error channel: async server operations send errors here for UI display
+    error_rx: mpsc::Receiver<String>,
+    error_tx: mpsc::Sender<String>,
+
     // Dialog state
     show_url_dialog: bool,
     url_input: String,
@@ -57,8 +61,8 @@ pub struct QvodApp {
     // Embedded local server (standalone mode)
     _local_server: Option<LocalServer>,
 
-    // Video decoder using ffmpeg subprocess
-    frame_reader: Option<FfmpegFrameReader>,
+    // Video decoder (ffmpeg-next native or subprocess fallback)
+    frame_reader: Option<FrameReader>,
     current_file_path: Option<String>,
     video_texture: Option<egui::TextureHandle>,
 }
@@ -66,15 +70,23 @@ pub struct QvodApp {
 impl QvodApp {
     #[must_use]
     pub fn new(startup_uri: Option<String>, cli_server_url: Option<String>) -> Self {
+        tracing::info!(
+            "QvodApp::new: startup_uri={:?}, cli_server_url={:?}",
+            startup_uri,
+            cli_server_url
+        );
         let settings = AppSettings::load().with_cli_server_url(cli_server_url);
         let player = PlayerPanel::new();
         let (tx, rx) = mpsc::channel();
+        let (error_tx, error_rx) = mpsc::channel();
 
         // Auto-start a local server when no remote server URL is configured
         let (server_client, local_server) = if let Some(url) = &settings.server_url {
+            tracing::info!("QvodApp::new: using remote server: {}", url);
             (Some(ServerClient::new(url.clone())), None)
         } else {
             // Spawn a local engine + server in the background
+            tracing::info!("QvodApp::new: starting local embedded server");
             let rt = tokio::runtime::Handle::try_current().expect("tokio runtime must be running");
             let (client, server) = rt.block_on(async { start_local_server(&settings).await });
             (client, Some(server))
@@ -95,6 +107,8 @@ impl QvodApp {
             pending_play_url: None,
             status_rx: rx,
             status_tx: tx,
+            error_rx,
+            error_tx,
             show_url_dialog: false,
             url_input: String::new(),
             _local_server: local_server,
@@ -132,11 +146,12 @@ impl QvodApp {
     }
 
     pub fn play_uri(&mut self, uri: &str, title: &str) {
+        tracing::info!("play_uri: uri={}, title={}", uri, title);
         let is_file = is_local_file_path(uri);
+        let is_url =
+            uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("qvod://");
 
         let file_uri = if is_file {
-            // Convert local path to file:// URI
-            // Ensure absolute path with forward slashes
             let normalized = if cfg!(windows) {
                 uri.replace('\\', "/")
             } else {
@@ -147,35 +162,41 @@ impl QvodApp {
             uri.to_string()
         };
 
-        // Close previous frame reader
         self.frame_reader = None;
         self.player.clear_video();
         self.current_file_path = None;
 
-        // For local files, start the ffmpeg subprocess decoder
-        if is_file {
-            let raw_path = if cfg!(windows) {
-                uri.replace("file://", "").replace("\\\\", "\\")
+        // Start video decoder for local files and http(s) URLs.
+        // In remote-server mode this avoids sending file:// paths to the
+        // server where the file doesn't exist.  In standalone mode it
+        // provides local rendering alongside the embedded engine.
+        if is_file || is_url {
+            let source = if is_file {
+                if cfg!(windows) {
+                    uri.replace("file://", "").replace("\\\\", "\\")
+                } else {
+                    uri.to_string()
+                }
             } else {
                 uri.to_string()
             };
-            match FfmpegFrameReader::open(&raw_path) {
+            match FrameReader::open(&source) {
                 Ok(reader) => {
                     tracing::info!(
-                        "Started ffmpeg decoder for {} ({}x{}, {:.1}fps)",
-                        raw_path,
+                        "Started native decoder for {} ({}x{}, {:.1}fps)",
+                        source,
                         reader.width(),
                         reader.height(),
                         reader.fps()
                     );
                     self.player
                         .set_video_dimensions(reader.width(), reader.height());
-                    self.current_file_path = Some(raw_path);
+                    self.current_file_path = Some(source);
                     self.frame_reader = Some(reader);
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Could not start ffmpeg decoder (playback via HTTP streaming): {e}"
+                        "Could not start native decoder (playback via server streaming): {e}"
                     );
                 }
             }
@@ -196,34 +217,56 @@ impl QvodApp {
         });
         self.player_state = PlayerState::Buffering;
 
-        // In server mode, tell the remote server to start playing.
+        // Decide how to play: local decoder vs server.
         if self.server_client.is_some() {
             self.player.controls.playing = true;
-            if is_file {
+            let is_remote = self.settings.server_url.is_some();
+            if is_remote && self.frame_reader.is_some() {
+                // Remote server mode with local decoder → play locally,
+                // skip the server (file doesn't exist on the remote machine).
+                tracing::info!("play_uri: playing locally via ffmpeg decoder");
+                self.player_state = PlayerState::Playing;
+            } else if is_remote && is_file {
+                // Remote server mode + local file + decoder failed.
+                // The server is on a different machine and cannot access
+                // this file directly.
+                let err_msg = "无法播放本地文件：解码失败。".into();
+                tracing::error!("play_uri: {err_msg}");
+                self.player_state = PlayerState::Error(err_msg);
+                self.player.controls.playing = false;
+            } else if is_file {
+                tracing::info!("play_uri: sending file URL to server");
                 self.pending_play_url = Some(file_uri);
             } else {
+                tracing::info!("play_uri: sending hash to server: {:?}", self.current_hash);
                 self.pending_play_hash = self.current_hash.clone();
             }
         }
     }
 
     pub fn on_keypress(&mut self, key: egui::Key) {
+        tracing::info!("on_keypress: {:?}", key);
         match key {
             egui::Key::Space => {
                 self.player.controls.toggle_play();
                 self.player_state = if self.player.controls.playing {
+                    tracing::info!("Keyboard: play");
                     PlayerState::Playing
                 } else {
+                    tracing::info!("Keyboard: pause");
                     PlayerState::Paused
                 };
             }
             egui::Key::ArrowLeft => {
+                tracing::info!("Keyboard: seek backward 10s");
                 self.player.controls.seek_backward(10000);
             }
             egui::Key::ArrowRight => {
+                tracing::info!("Keyboard: seek forward 10s");
                 self.player.controls.seek_forward(10000);
             }
             egui::Key::Escape => {
+                tracing::info!("Keyboard: stop");
                 self.player_state = PlayerState::Stopped;
                 self.player.controls.stop_pressed = true;
                 self.player.controls.reset();
@@ -246,9 +289,11 @@ impl eframe::App for QvodApp {
         if let Some(hash) = self.pending_play_hash.take() {
             if let Some(ref client) = self.server_client {
                 let client = client.clone();
+                let err_tx = self.error_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = client.play(&hash).await {
                         tracing::error!("server play failed: {e}");
+                        let _ = err_tx.send(format!("播放失败: {e}"));
                     }
                 });
             }
@@ -256,9 +301,11 @@ impl eframe::App for QvodApp {
         if let Some(url) = self.pending_play_url.take() {
             if let Some(ref client) = self.server_client {
                 let client = client.clone();
+                let err_tx = self.error_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = client.play_uri(&url).await {
                         tracing::error!("server play_uri failed: {e}");
+                        let _ = err_tx.send(format!("播放失败: {e}"));
                     }
                 });
             }
@@ -581,20 +628,32 @@ impl eframe::App for QvodApp {
                     self.player.controls.stop_pressed = false;
                     let client = client.clone();
                     let h = hash.clone();
+                    let err_tx = self.error_tx.clone();
                     tokio::spawn(async move {
-                        let _ = client.stop(&h).await;
+                        if let Err(e) = client.stop(&h).await {
+                            tracing::error!("server stop failed: {e}");
+                            let _ = err_tx.send(format!("停止失败: {e}"));
+                        }
                     });
                 } else {
                     // Play / Pause toggle
                     if pre_playing && !self.player.controls.playing {
                         let client = client.clone();
+                        let err_tx = self.error_tx.clone();
                         tokio::spawn(async move {
-                            let _ = client.pause().await;
+                            if let Err(e) = client.pause().await {
+                                tracing::error!("server pause failed: {e}");
+                                let _ = err_tx.send(format!("暂停失败: {e}"));
+                            }
                         });
                     } else if !pre_playing && self.player.controls.playing {
                         let client = client.clone();
+                        let err_tx = self.error_tx.clone();
                         tokio::spawn(async move {
-                            let _ = client.resume().await;
+                            if let Err(e) = client.resume().await {
+                                tracing::error!("server resume failed: {e}");
+                                let _ = err_tx.send(format!("恢复播放失败: {e}"));
+                            }
                         });
                     }
 
@@ -602,18 +661,31 @@ impl eframe::App for QvodApp {
                     if self.player.controls.position_ms != pre_position {
                         let client = client.clone();
                         let pos = self.player.controls.position_ms;
+                        let err_tx = self.error_tx.clone();
                         tokio::spawn(async move {
-                            let _ = client.seek(&hash, pos).await;
+                            if let Err(e) = client.seek(&hash, pos).await {
+                                tracing::error!("server seek failed: {e}");
+                                let _ = err_tx.send(format!("拖拽失败: {e}"));
+                            }
                         });
                     }
                 }
             }
         }
 
+        // ── Process errors from async server operations ──────────────
+        while let Ok(err_msg) = self.error_rx.try_recv() {
+            tracing::error!("Server operation error, showing popup: {err_msg}");
+            self.player_state = PlayerState::Error(err_msg);
+            self.player.controls.playing = false;
+        }
+
         // ── Process status responses from server ─────────────────────
         while let Ok(status) = self.status_rx.try_recv() {
             match status {
                 Some(s) => {
+                    tracing::debug!("Status update: state={}, pos={}ms, dur={}ms, buffered={:.1}s, progress={:.1}%",
+                        s.state, s.position_ms, s.duration_ms, s.buffered_seconds, s.download_progress * 100.0);
                     self.player.controls.position_ms = s.position_ms;
                     self.player.controls.duration_ms = s.duration_ms;
                     self.player.controls.buffered_seconds = s.buffered_seconds;
@@ -622,25 +694,30 @@ impl eframe::App for QvodApp {
                     match s.state.as_str() {
                         "Playing" => {
                             if self.player_state == PlayerState::Buffering {
+                                tracing::info!("Status: buffering -> playing");
                                 self.player_state = PlayerState::Playing;
                                 self.player.controls.playing = true;
                             }
                         }
                         "Ended" => {
                             if self.player_state != PlayerState::Stopped {
+                                tracing::info!("Status: stream ended");
                                 self.player_state = PlayerState::Ended;
                                 self.player.controls.playing = false;
                             }
                         }
                         "Paused" => {
                             if self.player_state == PlayerState::Playing {
+                                tracing::info!("Status: stream paused by server");
                                 self.player_state = PlayerState::Paused;
                                 self.player.controls.playing = false;
                             }
                         }
                         "Error" => {
                             if self.player_state != PlayerState::Stopped {
-                                self.player_state = PlayerState::Error("Stream error".into());
+                                let err_msg = "服务器流错误".into();
+                                tracing::error!("Status: stream error from server");
+                                self.player_state = PlayerState::Error(err_msg);
                                 self.player.controls.playing = false;
                             }
                         }
@@ -661,6 +738,7 @@ impl eframe::App for QvodApp {
                     });
                 }
                 None => {
+                    tracing::warn!("Status: server returned no status");
                     self.status.update(NetworkStatus {
                         server_url: self.settings.server_url.clone(),
                         server_connected: false,
@@ -678,8 +756,15 @@ impl eframe::App for QvodApp {
                     let h = hash.clone();
                     let tx = self.status_tx.clone();
                     tokio::spawn(async move {
-                        let result = client.get_status(&h).await.ok();
-                        let _ = tx.send(result);
+                        match client.get_status(&h).await {
+                            Ok(status) => {
+                                let _ = tx.send(Some(status));
+                            }
+                            Err(e) => {
+                                tracing::warn!("Status poll failed: {e}");
+                                let _ = tx.send(None);
+                            }
+                        }
                     });
                 }
             }
@@ -692,7 +777,7 @@ impl eframe::App for QvodApp {
             self.player_state = PlayerState::Paused;
         }
 
-        // ── Video frame rendering via ffmpeg subprocess ──────────
+        // ── Video frame rendering via native decoder ──────────
         if let Some(ref mut reader) = self.frame_reader {
             match self.player_state {
                 PlayerState::Playing => {
@@ -755,6 +840,12 @@ impl eframe::App for QvodApp {
 /// Start an embedded QVOD engine + local HTTP server on localhost.
 /// Returns a (ServerClient, LocalServer) tuple.
 async fn start_local_server(settings: &AppSettings) -> (Option<ServerClient>, LocalServer) {
+    tracing::info!(
+        "start_local_server: port={}, cache_dir={:?}",
+        settings.local_server_port,
+        settings.cache_dir
+    );
+
     let engine_config = EngineConfig {
         cache_dir: settings.cache_dir.clone(),
         tracker_enabled: false,
@@ -763,26 +854,29 @@ async fn start_local_server(settings: &AppSettings) -> (Option<ServerClient>, Lo
         ..Default::default()
     };
 
+    tracing::info!("start_local_server: creating QvodEngine");
     let engine = QvodEngine::new(engine_config).await;
+
     let server_config = LocalServerConfig::new(settings.local_server_port)
         .with_bind_address(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
 
+    tracing::info!("start_local_server: starting LocalServer");
     match LocalServer::new(&server_config, engine).await {
         Ok(server) => {
             let port: u16 = server.port();
             let client = ServerClient::new(format!("http://127.0.0.1:{port}"));
-            tracing::info!("Embedded local server started on port {port}");
+            tracing::info!("start_local_server: embedded server started on port {port}");
             (Some(client), server)
         }
         Err(e) => {
-            tracing::error!("Failed to start embedded local server: {e}");
-            // Use a different port for the fallback attempt
+            tracing::error!("start_local_server: failed: {e}, trying fallback port");
             let fallback_config = LocalServerConfig::new(0)
                 .with_bind_address(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
             let fallback_engine = QvodEngine::new(EngineConfig::default()).await;
             let fallback_server = LocalServer::new(&fallback_config, fallback_engine)
                 .await
-                .unwrap_or_else(|e| panic!("fallback server also failed: {e}"));
+                .unwrap_or_else(|e| panic!("start_local_server: fallback also failed: {e}"));
+            tracing::info!("start_local_server: fallback server started");
             (None, fallback_server)
         }
     }

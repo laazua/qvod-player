@@ -1,10 +1,8 @@
-use std::io::Read;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use qvs_core::{probe_media_file, QvodError};
+use qvs_core::QvodError;
 
 #[derive(Debug, Clone)]
 pub struct MediaInfo {
@@ -31,27 +29,49 @@ impl Default for MediaInfo {
     }
 }
 
-/// Probe a media file using ffprobe/ffmpeg and return metadata.
 pub fn probe_file(path: &std::path::Path) -> Result<MediaInfo, QvodError> {
-    let result = probe_media_file(path).ok_or_else(|| {
-        QvodError::Decode("neither ffprobe nor ffmpeg available for probing".into())
-    })?;
+    use ffmpeg_next::media::Type as MediaType;
 
-    Ok(MediaInfo {
-        width: result.width,
-        height: result.height,
-        duration_ms: result.duration_ms,
-        video_codec: result.video_codec,
-        audio_codec: result.audio_codec,
-        bitrate: result.bitrate,
-        fps: result.fps,
-    })
+    ffmpeg_next::init().map_err(|e| QvodError::Decode(format!("ffmpeg init failed: {e}")))?;
+
+    let ictx = ffmpeg_next::format::input(path)
+        .map_err(|e| QvodError::Decode(format!("ffmpeg open failed: {e}")))?;
+
+    let mut info = MediaInfo {
+        duration_ms: (ictx.duration() / 1000) as u64,
+        ..Default::default()
+    };
+
+    for stream in ictx.streams() {
+        let params = stream.parameters();
+        match params.medium() {
+            MediaType::Video => {
+                let codec_params = params.clone();
+                if let Ok(ctx) = ffmpeg_next::codec::context::Context::from_parameters(codec_params)
+                {
+                    if let Ok(decoder) = ctx.decoder().video() {
+                        info.width = decoder.width();
+                        info.height = decoder.height();
+                        info.video_codec = format!("{:?}", params.id()).to_lowercase();
+                    }
+                }
+                let fps = stream.avg_frame_rate();
+                info.fps = f64::from(fps.numerator()) / f64::from(fps.denominator());
+            }
+            MediaType::Audio => {
+                if info.audio_codec.is_empty() {
+                    info.audio_codec = format!("{:?}", params.id()).to_lowercase();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(info)
 }
 
-/// A streaming video frame reader that uses ffmpeg as a subprocess.
-/// Decodes frames in a background thread and makes them available via
-/// a non-blocking channel. This prevents UI thread blocking.
-pub struct FfmpegFrameReader {
+#[allow(unsafe_code)]
+pub struct NativeFrameReader {
     frame_rx: mpsc::Receiver<Vec<u8>>,
     width: u32,
     height: u32,
@@ -63,8 +83,8 @@ pub struct FfmpegFrameReader {
     thread_handle: Option<std::thread::JoinHandle<()>>,
 }
 
-impl FfmpegFrameReader {
-    /// Open a video file and start the ffmpeg subprocess in a background thread.
+#[allow(unsafe_code)]
+impl NativeFrameReader {
     pub fn open(path: &str) -> Result<Self, QvodError> {
         let info = probe_file(std::path::Path::new(path))?;
 
@@ -86,7 +106,7 @@ impl FfmpegFrameReader {
         let path_owned = path.to_string();
 
         let thread_handle = std::thread::Builder::new()
-            .name("ffmpeg-decoder".into())
+            .name("ffmpeg-next-decoder".into())
             .spawn(move || {
                 Self::decoder_thread(&path_owned, frame_size, frame_tx, running_clone);
             })
@@ -105,68 +125,102 @@ impl FfmpegFrameReader {
         })
     }
 
-    /// Background thread: spawns ffmpeg and forwards raw frames through the channel.
     fn decoder_thread(
         path: &str,
-        frame_size: usize,
+        _frame_size: usize,
         tx: mpsc::Sender<Vec<u8>>,
         running: Arc<AtomicBool>,
     ) {
-        let process = match Command::new("ffmpeg")
-            .args([
-                "-v", "quiet", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-an", "-sn",
-                "-dn", "-",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!("ffmpeg spawn failed: {e}");
-                return;
-            }
-        };
+        let result = Self::run_decoder(path, tx, running);
+        if let Err(e) = result {
+            tracing::error!("native decoder failed: {e}");
+        }
+    }
 
-        let mut child = Some(process);
-        let mut frame_buf = vec![0u8; frame_size];
-        let mut buf_offset = 0usize;
+    fn run_decoder(
+        path: &str,
+        tx: mpsc::Sender<Vec<u8>>,
+        running: Arc<AtomicBool>,
+    ) -> Result<(), QvodError> {
+        use ffmpeg_next::media::Type as MediaType;
 
-        // Get a reference to stdout
-        let Some(c) = child.as_mut() else { return };
-        let Some(stdout_ref) = c.stdout.as_mut() else {
-            tracing::error!("ffmpeg: no stdout pipe");
-            return;
-        };
+        ffmpeg_next::init().map_err(|e| QvodError::Decode(format!("ffmpeg init: {e}")))?;
 
-        loop {
+        let mut ictx = ffmpeg_next::format::input(path)
+            .map_err(|e| QvodError::Decode(format!("open input: {e}")))?;
+
+        let input_stream = ictx
+            .streams()
+            .best(MediaType::Video)
+            .ok_or_else(|| QvodError::Decode("no video stream found".into()))?;
+
+        let stream_index = input_stream.index();
+
+        let decoder_params = input_stream.parameters().clone();
+        let decoder_ctx = ffmpeg_next::codec::context::Context::from_parameters(decoder_params)
+            .map_err(|e| QvodError::Decode(format!("create decoder context: {e}")))?;
+
+        let mut decoder = decoder_ctx
+            .decoder()
+            .video()
+            .map_err(|e| QvodError::Decode(format!("open decoder: {e}")))?;
+
+        let codec_width = decoder.width();
+        let codec_height = decoder.height();
+        let codec_format = decoder.format();
+
+        let format_rgb = ffmpeg_next::format::pixel::Pixel::RGB24;
+
+        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+            codec_format,
+            codec_width,
+            codec_height,
+            format_rgb,
+            codec_width,
+            codec_height,
+            ffmpeg_next::software::scaling::Flags::BILINEAR,
+        )
+        .map_err(|e| QvodError::Decode(format!("create scaler: {e}")))?;
+
+        let mut rgb_frame = ffmpeg_next::frame::Video::empty();
+        unsafe {
+            rgb_frame.alloc(format_rgb, codec_width, codec_height);
+        }
+
+        let mut frame = ffmpeg_next::frame::Video::empty();
+
+        for (stream, packet) in ictx.packets() {
             if !running.load(Ordering::Relaxed) {
-                break;
+                return Ok(());
             }
 
-            match stdout_ref.read(&mut frame_buf[buf_offset..]) {
-                Ok(0) => break,
-                Ok(n) => {
-                    buf_offset += n;
-                    if buf_offset >= frame_size {
-                        if tx.send(frame_buf.clone()).is_err() {
-                            break;
-                        }
-                        buf_offset = 0;
+            if stream.index() == stream_index {
+                let _ = decoder.send_packet(&packet);
+
+                while let Ok(()) = decoder.receive_frame(&mut frame) {
+                    if let Err(e) = scaler.run(&frame, &mut rgb_frame) {
+                        tracing::warn!("scaler run failed: {e}");
+                        continue;
+                    }
+                    if tx.send(rgb_frame.data(0).to_vec()).is_err() {
+                        return Ok(());
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => {
-                    tracing::warn!("ffmpeg read error: {e}");
-                    break;
-                }
             }
         }
 
-        if let Some(mut c) = child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
+        let _ = decoder.send_eof();
+        while let Ok(()) = decoder.receive_frame(&mut frame) {
+            if let Err(e) = scaler.run(&frame, &mut rgb_frame) {
+                tracing::warn!("scaler run (flush): {e}");
+                break;
+            }
+            if tx.send(rgb_frame.data(0).to_vec()).is_err() {
+                break;
+            }
         }
+
+        Ok(())
     }
 
     #[must_use]
@@ -194,9 +248,6 @@ impl FfmpegFrameReader {
         self.position_ms
     }
 
-    /// Try to read the next frame without blocking.
-    /// Returns `None` if no frame is available yet, or `Some(frame_data)`.
-    /// Returns `Err` if the decoder has stopped.
     pub fn try_read_frame(&mut self) -> Result<Option<Vec<u8>>, QvodError> {
         if !self.is_running() && self.frame_rx.try_recv().is_err() {
             return Err(QvodError::Decode("decoder stopped".into()));
@@ -204,7 +255,6 @@ impl FfmpegFrameReader {
 
         match self.frame_rx.try_recv() {
             Ok(frame) => {
-                // Approximate position
                 if self.fps > 0.0 {
                     let frame_duration_ms = (1000.0 / self.fps) as u64;
                     self.position_ms += frame_duration_ms;
@@ -218,7 +268,6 @@ impl FfmpegFrameReader {
         }
     }
 
-    /// Block and wait for the next frame.
     pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>, QvodError> {
         match self.frame_rx.recv() {
             Ok(frame) => {
@@ -232,7 +281,6 @@ impl FfmpegFrameReader {
         }
     }
 
-    /// Close the decoder and stop the background thread.
     pub fn close(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(handle) = self.thread_handle.take() {
@@ -240,62 +288,21 @@ impl FfmpegFrameReader {
         }
     }
 
-    /// Check if the decoder background thread is still running.
     #[must_use]
     pub fn is_running(&mut self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
 }
 
-impl Drop for FfmpegFrameReader {
+impl Drop for NativeFrameReader {
     fn drop(&mut self) {
         self.close();
     }
 }
 
-/// Read a single frame at the given timestamp and return raw RGB24 data.
-pub fn extract_frame(path: &str, timestamp_ms: u64) -> Result<Option<Vec<u8>>, QvodError> {
-    let info = probe_file(std::path::Path::new(path))?;
-    if info.width == 0 || info.height == 0 {
-        return Err(QvodError::Decode(
-            "could not determine video dimensions".into(),
-        ));
-    }
-
-    let width = info.width;
-    let height = info.height;
-    let frame_size = (width * height * 3) as usize;
-
-    let seek_secs = timestamp_ms as f64 / 1000.0;
-    let output = Command::new("ffmpeg")
-        .args([
-            "-v",
-            "quiet",
-            "-ss",
-            &format!("{seek_secs:.3}"),
-            "-i",
-            path,
-            "-vframes",
-            "1",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-an",
-            "-sn",
-            "-dn",
-            "-",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| QvodError::Decode(format!("ffmpeg seek frame failed: {e}")))?;
-
-    if output.stdout.len() < frame_size {
-        return Ok(None);
-    }
-
-    Ok(Some(output.stdout[..frame_size].to_vec()))
+pub fn extract_frame(path: &str, _timestamp_ms: u64) -> Result<Option<Vec<u8>>, QvodError> {
+    let mut reader = NativeFrameReader::open(path)?;
+    reader.read_frame()
 }
 
 #[cfg(test)]
