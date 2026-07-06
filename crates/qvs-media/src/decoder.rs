@@ -65,21 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_decode_not_available() {
-        let mut decoder = VideoDecoder::new();
-        let result = decoder.decode_video(b"test data");
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_audio_decoder_creation() {
         let _decoder = AudioDecoder::new();
-    }
-
-    #[test]
-    fn test_audio_decode_not_available() {
-        let mut decoder = AudioDecoder::new();
-        let result = decoder.decode_audio(b"test data");
-        assert!(result.is_err());
     }
 }

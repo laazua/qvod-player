@@ -48,9 +48,10 @@ lru = "0.12"
 futures = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 rfd = "0.14"
+ffmpeg-next = { version = "8.1", features = ["static", "codec", "format", "device", "filter", "software-resampling", "software-scaling"] }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

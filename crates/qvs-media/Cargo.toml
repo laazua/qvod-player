@@ -7,6 +7,11 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["ffmpeg-native"]
+ffmpeg-native = ["dep:ffmpeg-next"]
+ffmpeg-subprocess = []
+
 [dependencies]
 qvs-core = { path = "../qvs-core" }
 serde.workspace = true
@@ -14,3 +19,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+ffmpeg-next = { workspace = true, optional = true }

@@ -52,6 +52,11 @@ impl LocalServer {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
         let bind_addr = config.bind_address;
+        tracing::info!(
+            "Starting server task on {}:{}, 4 routes configured (play/status/segment/control)",
+            bind_addr,
+            port
+        );
         tokio::spawn(async move {
             let addr = SocketAddr::new(bind_addr, port);
             let listener = match TcpListener::bind(addr).await {
@@ -67,7 +72,7 @@ impl LocalServer {
                 .with_graceful_shutdown(async {
                     tokio::select! {
                         _ = shutdown_rx => {
-                            tracing::info!("Shutdown signal received");
+                            tracing::info!("Shutdown signal received, stopping HTTP server");
                         }
                         () = shutdown_signal() => {
                             tracing::info!("OS shutdown signal received");
@@ -78,6 +83,7 @@ impl LocalServer {
                 .unwrap_or_else(|e| {
                     tracing::error!("Server error: {e}");
                 });
+            tracing::info!("Server task exited");
         });
 
         Ok(Self {

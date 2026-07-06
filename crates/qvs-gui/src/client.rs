@@ -50,6 +50,11 @@ impl ServerClient {
 
     /// Play a file:// or http(s):// URL via the remote server (uses `url` field).
     pub async fn play_uri(&self, uri: &str) -> Result<(), QvodError> {
+        tracing::info!(
+            "ServerClient::play_uri: uri={}, server={}",
+            uri,
+            self.base_url
+        );
         let ctrl_url = format!("{}/control", self.base_url);
         let body = serde_json::json!({
             "action": "play",
@@ -62,9 +67,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("无法连接到服务器 {}: {e}", self.base_url);
+                tracing::error!("ServerClient::play_uri: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -72,13 +79,20 @@ impl ServerClient {
             .await
             .map_err(|e| QvodError::Protocol(e.to_string()))?;
         if ctrl.success {
+            tracing::info!("ServerClient::play_uri: success");
             Ok(())
         } else {
+            tracing::error!("ServerClient::play_uri: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }
 
     pub async fn play(&self, hash: &str) -> Result<(), QvodError> {
+        tracing::info!(
+            "ServerClient::play: hash={}, server={}",
+            hash,
+            self.base_url
+        );
         let url = format!("{}/control", self.base_url);
         let body = serde_json::json!({
             "action": "play",
@@ -91,9 +105,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("无法连接到服务器 {}: {e}", self.base_url);
+                tracing::error!("ServerClient::play: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -101,13 +117,16 @@ impl ServerClient {
             .await
             .map_err(|e| QvodError::Protocol(e.to_string()))?;
         if ctrl.success {
+            tracing::info!("ServerClient::play: success");
             Ok(())
         } else {
+            tracing::error!("ServerClient::play: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }
 
     pub async fn pause(&self) -> Result<(), QvodError> {
+        tracing::info!("ServerClient::pause: server={}", self.base_url);
         let url = format!("{}/control", self.base_url);
         let body = serde_json::json!({ "action": "pause" });
         let resp = self
@@ -117,9 +136,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("暂停失败: {e}");
+                tracing::error!("ServerClient::pause: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -129,11 +150,13 @@ impl ServerClient {
         if ctrl.success {
             Ok(())
         } else {
+            tracing::error!("ServerClient::pause: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }
 
     pub async fn resume(&self) -> Result<(), QvodError> {
+        tracing::info!("ServerClient::resume: server={}", self.base_url);
         let url = format!("{}/control", self.base_url);
         let body = serde_json::json!({ "action": "resume" });
         let resp = self
@@ -143,9 +166,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("恢复播放失败: {e}");
+                tracing::error!("ServerClient::resume: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -155,11 +180,17 @@ impl ServerClient {
         if ctrl.success {
             Ok(())
         } else {
+            tracing::error!("ServerClient::resume: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }
 
     pub async fn stop(&self, hash: &str) -> Result<(), QvodError> {
+        tracing::info!(
+            "ServerClient::stop: hash={}, server={}",
+            hash,
+            self.base_url
+        );
         let url = format!("{}/control", self.base_url);
         let body = serde_json::json!({
             "action": "stop",
@@ -172,9 +203,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("停止失败: {e}");
+                tracing::error!("ServerClient::stop: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -184,11 +217,18 @@ impl ServerClient {
         if ctrl.success {
             Ok(())
         } else {
+            tracing::error!("ServerClient::stop: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }
 
     pub async fn seek(&self, hash: &str, timestamp_ms: u64) -> Result<(), QvodError> {
+        tracing::info!(
+            "ServerClient::seek: hash={}, timestamp={}ms, server={}",
+            hash,
+            timestamp_ms,
+            self.base_url
+        );
         let url = format!("{}/control", self.base_url);
         let body = serde_json::json!({
             "action": "seek",
@@ -202,9 +242,11 @@ impl ServerClient {
             .send()
             .await
             .map_err(|e| {
+                let msg = format!("拖拽失败: {e}");
+                tracing::error!("ServerClient::seek: {}", msg);
                 QvodError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    e.to_string(),
+                    msg,
                 ))
             })?;
         let ctrl: ControlResponse = resp
@@ -212,8 +254,10 @@ impl ServerClient {
             .await
             .map_err(|e| QvodError::Protocol(e.to_string()))?;
         if ctrl.success {
+            tracing::info!("ServerClient::seek: success");
             Ok(())
         } else {
+            tracing::error!("ServerClient::seek: server error: {}", ctrl.message);
             Err(QvodError::Protocol(ctrl.message))
         }
     }

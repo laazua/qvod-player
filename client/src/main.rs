@@ -40,23 +40,32 @@ async fn main() {
 }
 
 async fn cmd_play(uri: &str) {
+    tracing::info!("cmd_play: uri={}", uri);
     let config = EngineConfig::default();
     let mut engine = QvodEngine::new(config).await;
 
     match engine.play(uri).await {
         Ok(stream) => {
             let duration = stream.metadata.duration_ms;
+            let filename = stream.metadata.filename;
+            tracing::info!(
+                "cmd_play: success, file={}, duration={}ms",
+                filename,
+                duration
+            );
             println!("Playing: {uri}");
+            println!("File: {filename}");
             println!("Duration: {duration} ms");
         }
         Err(e) => {
-            tracing::error!("Play failed: {e}");
+            tracing::error!("cmd_play: failed for {uri}: {e}");
             eprintln!("Error: {e}");
         }
     }
 }
 
 async fn cmd_status() {
+    tracing::info!("cmd_status");
     let config = EngineConfig::default();
     let engine = QvodEngine::new(config).await;
     let _ = engine;
@@ -64,10 +73,12 @@ async fn cmd_status() {
 }
 
 async fn cmd_list() {
+    tracing::info!("cmd_list");
     println!("No active streams.");
 }
 
 async fn cmd_cache(clean: bool, size: Option<u64>) {
+    tracing::info!("cmd_cache: clean={}, size={:?}", clean, size);
     if clean {
         println!("Cache cleaned.");
     }

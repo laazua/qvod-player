@@ -1,5 +1,7 @@
-// Media decoding — uses ffmpeg/ffprobe binaries via subprocess for frame extraction.
-// When ffmpeg development headers are available, prefer ffmpeg-next for better performance.
+// Media decoding layer.
+// When "ffmpeg-native" feature is active, uses ffmpeg-next (statically linked FFmpeg)
+// for frame decoding and media probing.
+// When "ffmpeg-subprocess" feature is active, uses ffmpeg/ffprobe binaries via subprocess.
 #![allow(
     clippy::missing_errors_doc,
     clippy::derivable_impls,
@@ -20,12 +22,27 @@
     clippy::needless_continue
 )]
 
+#[cfg(feature = "ffmpeg-native")]
+pub mod native;
+#[cfg(feature = "ffmpeg-native")]
+pub use native::NativeFrameReader as FrameReader;
+#[cfg(feature = "ffmpeg-native")]
+#[allow(unused_imports)]
+pub use native::*;
+
+#[cfg(feature = "ffmpeg-subprocess")]
+pub mod subprocess;
+#[cfg(feature = "ffmpeg-subprocess")]
+pub use subprocess::FfmpegFrameReader as FrameReader;
+#[cfg(feature = "ffmpeg-subprocess")]
+#[allow(unused_imports)]
+pub use subprocess::*;
+
 pub mod decoder;
 pub mod demuxer;
 pub mod format;
 pub mod renderer;
 pub mod resampler;
-pub mod subprocess;
 pub mod sync;
 
 pub use decoder::*;
@@ -33,5 +50,4 @@ pub use demuxer::*;
 pub use format::*;
 pub use renderer::*;
 pub use resampler::*;
-pub use subprocess::*;
 pub use sync::*;

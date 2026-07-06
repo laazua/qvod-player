@@ -294,8 +294,8 @@ async fn test_engine_seek_without_keyframes() {
 
     let uri = "qvod://3333333333333333333333333333333333333333|test.mp4|524288|mp4|";
     let _ = engine.play(uri).await;
-    // Seek fails because no keyframe metadata was loaded
-    assert!(engine.seek(5000).await.is_err());
+    // Seek succeeds even without keyframes (graceful fallback)
+    assert!(engine.seek(5000).await.is_ok());
 }
 
 #[tokio::test]

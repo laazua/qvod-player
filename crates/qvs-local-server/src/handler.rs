@@ -69,6 +69,12 @@ pub async fn handle_play(
     headers: HeaderMap,
 ) -> Result<Response, StatusCode> {
     let hash = &params.hash;
+    tracing::info!(
+        "handle_play: hash={}, name={:?}, size={:?}",
+        hash,
+        params.name,
+        params.size
+    );
 
     let uri: String = if hash.starts_with("http://")
         || hash.starts_with("https://")
@@ -77,7 +83,7 @@ pub async fn handle_play(
         hash.clone()
     } else {
         let _ = parse_info_hash(hash).map_err(|e| {
-            tracing::warn!("invalid info_hash: {e}");
+            tracing::warn!("handle_play: invalid info_hash: {e}");
             StatusCode::BAD_REQUEST
         })?;
         format!(
@@ -90,11 +96,16 @@ pub async fn handle_play(
     let (info_hash, file_size) = {
         let mut engine = state.engine.lock().await;
         let stream = engine.play(&uri).await.map_err(|e| {
-            tracing::error!("play failed: {e:?}");
+            tracing::error!("handle_play: play failed: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         let ih = stream.metadata.info_hash;
         let fs = engine.file_size(&ih).unwrap_or(0);
+        tracing::info!(
+            "handle_play: stream started, info_hash={}, file_size={}",
+            ih,
+            fs
+        );
         (ih, fs)
     };
 
@@ -112,6 +123,7 @@ pub async fn handle_play(
 
     tokio::spawn(async move {
         let mut position = start_offset;
+        let mut streamed_bytes: u64 = 0;
 
         loop {
             let engine = engine_clone.lock().await;
@@ -119,14 +131,23 @@ pub async fn handle_play(
 
             match status {
                 Some(st) if st.state == StreamState::Ended => {
+                    tracing::info!(
+                        "handle_play stream: ended, sending final data at offset={}",
+                        position
+                    );
                     if let Some(data) = engine.read_buffer(&info_hash, position, chunk_size).await {
                         if !data.is_empty() {
+                            streamed_bytes += data.len() as u64;
                             let _ = tx.send(Ok(data)).await;
                         }
                     }
+                    tracing::info!(
+                        "handle_play stream: done, total streamed={}",
+                        streamed_bytes
+                    );
                     break;
                 }
-                Some(_) => {
+                Some(_st) => {
                     if let Some(data) = engine.read_buffer(&info_hash, position, chunk_size).await {
                         if data.is_empty() {
                             drop(engine);
@@ -134,7 +155,12 @@ pub async fn handle_play(
                             continue;
                         }
                         position += data.len() as u64;
+                        streamed_bytes += data.len() as u64;
                         if tx.send(Ok(data)).await.is_err() {
+                            tracing::warn!(
+                                "handle_play stream: client closed connection at offset={}",
+                                position
+                            );
                             break;
                         }
                     } else {
@@ -142,7 +168,10 @@ pub async fn handle_play(
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 }
-                None => break,
+                None => {
+                    tracing::warn!("handle_play stream: stream not found, breaking");
+                    break;
+                }
             }
         }
     });
@@ -169,8 +198,16 @@ pub async fn handle_segment(
     State(state): State<Arc<AppState>>,
     Query(params): Query<SegmentParams>,
 ) -> Result<Response, StatusCode> {
+    tracing::info!(
+        "handle_segment: hash={}, offset={:?}, length={:?}, index={:?}",
+        params.hash,
+        params.offset,
+        params.length,
+        params.index
+    );
+
     let info_hash = parse_info_hash(&params.hash).map_err(|e| {
-        tracing::warn!("invalid info_hash: {e}");
+        tracing::warn!("handle_segment: invalid info_hash: {e}");
         StatusCode::BAD_REQUEST
     })?;
 
@@ -180,8 +217,14 @@ pub async fn handle_segment(
     let engine = state.engine.lock().await;
     if let Some(data) = engine.read_buffer(&info_hash, offset, length).await {
         if data.is_empty() {
+            tracing::warn!(
+                "handle_segment: empty data for hash={} offset={}",
+                params.hash,
+                offset
+            );
             return Err(StatusCode::NOT_FOUND);
         }
+        tracing::debug!("handle_segment: returning {} bytes", data.len());
         Ok(Response::builder()
             .header("Content-Type", "video/MP2T")
             .header("Content-Length", data.len().to_string())
@@ -189,6 +232,11 @@ pub async fn handle_segment(
             .body(Body::from(data))
             .unwrap())
     } else {
+        tracing::warn!(
+            "handle_segment: data not ready for hash={} offset={}",
+            params.hash,
+            offset
+        );
         Err(StatusCode::NOT_FOUND)
     }
 }
@@ -197,6 +245,7 @@ pub async fn handle_status(
     State(state): State<Arc<AppState>>,
     Query(params): Query<PlayParams>,
 ) -> Json<Value> {
+    tracing::info!("handle_status: hash={:?}", params.hash);
     let engine = state.engine.lock().await;
 
     if params.hash.is_empty() {
@@ -228,6 +277,7 @@ pub async fn handle_status(
             .into_iter()
             .collect();
 
+        tracing::info!("handle_status: {} active streams", streams.len());
         Json(json!({
             "active_streams": streams,
             "stream_count": streams.len(),
@@ -274,6 +324,14 @@ pub async fn handle_control(
     State(state): State<Arc<AppState>>,
     Json(params): Json<ControlParams>,
 ) -> Json<ControlResponse> {
+    tracing::info!(
+        "handle_control: action={}, hash={:?}, value={:?}, url={:?}",
+        params.action,
+        params.hash,
+        params.value,
+        params.url
+    );
+
     match params.action.as_str() {
         "play" => {
             let uri = if let Some(url) = &params.url {
@@ -288,6 +346,7 @@ pub async fn handle_control(
                     format!("qvod://{hash}||0|mp4|")
                 }
             } else {
+                tracing::warn!("handle_control play: hash or url required");
                 return Json(ControlResponse {
                     success: false,
                     message: "hash or url required".into(),
@@ -295,17 +354,24 @@ pub async fn handle_control(
             };
             let mut engine = state.engine.lock().await;
             match engine.play(&uri).await {
-                Ok(_stream) => Json(ControlResponse {
-                    success: true,
-                    message: format!("playing {uri}"),
-                }),
-                Err(e) => Json(ControlResponse {
-                    success: false,
-                    message: format!("play failed: {e}"),
-                }),
+                Ok(_stream) => {
+                    tracing::info!("handle_control play: success, uri={}", uri);
+                    Json(ControlResponse {
+                        success: true,
+                        message: format!("playing {uri}"),
+                    })
+                }
+                Err(e) => {
+                    tracing::error!("handle_control play: failed, uri={}, error={e}", uri);
+                    Json(ControlResponse {
+                        success: false,
+                        message: format!("play failed: {e}"),
+                    })
+                }
             }
         }
         "pause" => {
+            tracing::info!("handle_control: pause requested");
             let mut engine = state.engine.lock().await;
             engine.pause().await;
             Json(ControlResponse {
@@ -314,6 +380,7 @@ pub async fn handle_control(
             })
         }
         "resume" => {
+            tracing::info!("handle_control: resume requested");
             let mut engine = state.engine.lock().await;
             engine.resume().await;
             Json(ControlResponse {
@@ -335,6 +402,7 @@ pub async fn handle_control(
                     match parse_info_hash(hash) {
                         Ok(ih) => ih,
                         Err(e) => {
+                            tracing::warn!("handle_control stop: invalid hash: {e}");
                             return Json(ControlResponse {
                                 success: false,
                                 message: format!("invalid hash: {e}"),
@@ -344,11 +412,13 @@ pub async fn handle_control(
                 };
                 let mut engine = state.engine.lock().await;
                 engine.stop(&info_hash);
+                tracing::info!("handle_control stop: stopped hash={}", hash);
                 Json(ControlResponse {
                     success: true,
                     message: "stopped".into(),
                 })
             } else {
+                tracing::warn!("handle_control stop: hash required");
                 Json(ControlResponse {
                     success: false,
                     message: "hash required".into(),
@@ -361,14 +431,20 @@ pub async fn handle_control(
                     Ok(ms) => {
                         let mut engine = state.engine.lock().await;
                         match engine.seek(ms).await {
-                            Ok(()) => Json(ControlResponse {
-                                success: true,
-                                message: format!("seeked to {ms}ms"),
-                            }),
-                            Err(e) => Json(ControlResponse {
-                                success: false,
-                                message: e.to_string(),
-                            }),
+                            Ok(()) => {
+                                tracing::info!("handle_control seek: seeked to {}ms", ms);
+                                Json(ControlResponse {
+                                    success: true,
+                                    message: format!("seeked to {ms}ms"),
+                                })
+                            }
+                            Err(e) => {
+                                tracing::warn!("handle_control seek: failed at {}ms: {e}", ms);
+                                Json(ControlResponse {
+                                    success: false,
+                                    message: e.to_string(),
+                                })
+                            }
                         }
                     }
                     Err(_) => Json(ControlResponse {
@@ -404,10 +480,13 @@ pub async fn handle_control(
                 message: msg,
             })
         }
-        _ => Json(ControlResponse {
-            success: false,
-            message: format!("unknown action: {}", params.action),
-        }),
+        _ => {
+            tracing::warn!("handle_control: unknown action: {}", params.action);
+            Json(ControlResponse {
+                success: false,
+                message: format!("unknown action: {}", params.action),
+            })
+        }
     }
 }
 

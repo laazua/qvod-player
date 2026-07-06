@@ -7,28 +7,48 @@ pub struct SeekEngine {
 impl SeekEngine {
     #[must_use]
     pub fn new(metadata: FileMeta) -> Self {
+        tracing::debug!(
+            "SeekEngine::new: duration={}ms, has_keyframe_index={}",
+            metadata.duration_ms,
+            metadata.keyframe_index.is_some()
+        );
         Self { metadata }
     }
 
     #[must_use]
     pub fn find_nearest_keyframe(&self, timestamp_ms: u64) -> Result<u64, QvodError> {
-        let kfi = self
-            .metadata
-            .keyframe_index
-            .as_ref()
-            .ok_or(QvodError::Protocol("no keyframe index".into()))?;
-        let entry = kfi
-            .find_nearest_i_frame(timestamp_ms)
-            .ok_or(QvodError::Protocol("no keyframe found".into()))?;
+        let kfi = self.metadata.keyframe_index.as_ref().ok_or_else(|| {
+            tracing::warn!("SeekEngine::find_nearest_keyframe: no keyframe index");
+            QvodError::Protocol("no keyframe index".into())
+        })?;
+        let entry = kfi.find_nearest_i_frame(timestamp_ms).ok_or_else(|| {
+            tracing::warn!(
+                "SeekEngine::find_nearest_keyframe: no keyframe at {}ms",
+                timestamp_ms
+            );
+            QvodError::Protocol("no keyframe found".into())
+        })?;
+        tracing::debug!(
+            "SeekEngine::find_nearest_keyframe: {}ms -> offset={}",
+            timestamp_ms,
+            entry.file_offset
+        );
         Ok(entry.file_offset)
     }
 
     #[must_use]
     pub fn piece_for_offset(&self, offset: u64) -> u32 {
         if self.metadata.piece_length == 0 {
+            tracing::warn!("SeekEngine::piece_for_offset: piece_length=0");
             return 0;
         }
-        (offset / self.metadata.piece_length) as u32
+        let piece = (offset / self.metadata.piece_length) as u32;
+        tracing::debug!(
+            "SeekEngine::piece_for_offset: offset={} -> piece={}",
+            offset,
+            piece
+        );
+        piece
     }
 
     #[must_use]

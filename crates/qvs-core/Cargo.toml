@@ -20,3 +20,4 @@ bytes.workspace = true
 hex.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+serde_json.workspace = true
